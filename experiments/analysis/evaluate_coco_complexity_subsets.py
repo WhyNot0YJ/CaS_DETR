@@ -842,7 +842,7 @@ def plot_scene_complexity_bar_figure(
     fig_width: float = 7.2,
     dpi: int = 300,
 ) -> None:
-    """2×2 分组柱图；子图标题在轴下方，顶部图例拉开项间距。"""
+    """2×2 分组柱图；子图标题在坐标轴下方，与图之间留少量空隙。"""
     try:
         import matplotlib
 
@@ -889,7 +889,7 @@ def plot_scene_complexity_bar_figure(
         ax.set_xticklabels(x_labels)
         ax.margins(x=0.04)
         ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.35, zorder=0)
-        ax.set_title(title_tex, y=-0.30, fontsize=10)
+        ax.set_title(title_tex, y=-0.22, fontsize=10)
 
     handles, labels = axes_flat[0].get_legend_handles_labels()
     fig.legend(
@@ -900,12 +900,9 @@ def plot_scene_complexity_bar_figure(
         bbox_to_anchor=(0.5, 1.02),
         frameon=False,
         fontsize=9,
-        columnspacing=2.8,
-        handletextpad=0.9,
-        handlelength=1.35,
     )
 
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.86, bottom=0.20, wspace=0.20, hspace=0.55)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.88, bottom=0.19, wspace=0.20, hspace=0.52)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight")
