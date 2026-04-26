@@ -687,7 +687,7 @@ def run_qualitative_4x4_grid(
     matplotlib.rcParams["image.resample"] = True
 
     fig, axes = plt.subplots(nrows=4, ncols=4, figsize=(fig_width, fig_height))
-    plt.subplots_adjust(wspace=0.01, hspace=0.05, bottom=0.06)
+    plt.subplots_adjust(wspace=0.01, hspace=0.05, bottom=0.11)
     if mark_baseline_failure_from_cas:
         print(
             "Baseline failure callouts: ON — red dashed boxes from CaS positions, zoom inset, "
@@ -762,7 +762,7 @@ def run_qualitative_4x4_grid(
             if row == len(image_paths) - 1:
                 ax.set_title(
                     col_titles[col],
-                    y=-0.12,
+                    y=-0.28,
                     fontweight="bold",
                     fontfamily="serif",
                 )
