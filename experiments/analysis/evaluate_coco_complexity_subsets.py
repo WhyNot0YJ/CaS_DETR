@@ -211,6 +211,18 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Fixed 1.0 模型对应的 keep ratio 常数。",
     )
+    parser.add_argument(
+        "--plot-out",
+        type=Path,
+        default=None,
+        help="若指定，评估结束后将 2×2 分组柱状图写入该路径，支持 .png / .pdf。",
+    )
+    parser.add_argument(
+        "--plot-figure-width",
+        type=float,
+        default=7.2,
+        help="与 --plot-out 配合：图宽，单位英寸；高度按 2×2 版式比例生成。",
+    )
     return parser.parse_args()
 
 
@@ -822,6 +834,84 @@ def save_scene_complexity_results(
     return csv_path, json_path
 
 
+def plot_scene_complexity_bar_figure(
+    records: Sequence[Mapping[str, Any]],
+    out_path: Path,
+    *,
+    model_order: Sequence[str],
+    fig_width: float = 7.2,
+    dpi: int = 300,
+) -> None:
+    """2×2 分组柱图；子图标题在轴下方，顶部图例拉开项间距。"""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:  # pragma: no cover
+        raise SystemExit("使用 --plot-out 需要安装 matplotlib。") from exc
+
+    subset_keys = ("simple", "medium", "complex")
+    x_labels = ("Low-density", "Medium-density", "High-density")
+    labels_legend = ["CaS-DETR" if n == "Dynamic CaS-DETR" else str(n) for n in model_order]
+    panels: Tuple[Tuple[str, str], ...] = (
+        ("mAP5095", r"$mAP^{50:95}$ (Overall)"),
+        ("AP50", r"$mAP^{50}$ (Overall)"),
+        ("APS5095", r"$AP_S^{50:95}$ (Small Objects)"),
+        ("APS50", r"$AP_S^{50}$ (Small Objects)"),
+    )
+
+    n_models = len(model_order)
+    x = np.arange(len(subset_keys), dtype=np.float64)
+    bar_width = 0.18
+    offsets = (np.arange(n_models, dtype=np.float64) - (n_models - 1) / 2.0) * bar_width
+    colors = ("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728")
+
+    fig, axes = plt.subplots(2, 2, figsize=(fig_width, fig_width * 0.52), constrained_layout=False)
+    axes_flat = axes.ravel()
+
+    for ax, (metric_key, title_tex) in zip(axes_flat, panels):
+        by_m_s = {
+            (str(r["model"]), str(r["subset_name"]).lower()): float(r[metric_key]) for r in records
+        }
+        for mi, model in enumerate(model_order):
+            ys = [by_m_s[(model, sk)] for sk in subset_keys]
+            bars = ax.bar(
+                x + offsets[mi],
+                ys,
+                width=bar_width,
+                label=labels_legend[mi],
+                color=colors[mi % len(colors)],
+                zorder=3,
+            )
+            ax.bar_label(bars, fmt="%.3f", fontsize=6, padding=1.5)
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_labels)
+        ax.margins(x=0.04)
+        ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.35, zorder=0)
+        ax.set_title(title_tex, y=-0.30, fontsize=10)
+
+    handles, labels = axes_flat[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        ncol=n_models,
+        bbox_to_anchor=(0.5, 1.02),
+        frameon=False,
+        fontsize=9,
+        columnspacing=2.8,
+        handletextpad=0.9,
+        handlelength=1.35,
+    )
+
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.86, bottom=0.20, wspace=0.20, hspace=0.55)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
 def run_online(args: argparse.Namespace) -> int:
     try:
         import torch
@@ -993,6 +1083,16 @@ def run_online(args: argparse.Namespace) -> int:
     print("\n# Saved Files")
     print(f"- CSV: `{csv_path}`")
     print(f"- JSON: `{json_path}`")
+
+    if args.plot_out is not None:
+        plot_path = resolve_repo_path(Path(args.plot_out))
+        plot_scene_complexity_bar_figure(
+            result_records,
+            plot_path,
+            model_order=[s.name for s in online_specs],
+            fig_width=float(args.plot_figure_width),
+        )
+        print(f"- Figure: `{plot_path}`")
 
     print_warning_lines(warning_notes)
     return 0
