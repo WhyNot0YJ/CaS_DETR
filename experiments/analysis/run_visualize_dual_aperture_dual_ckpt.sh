@@ -5,6 +5,8 @@ set -euo pipefail
 #   bash experiments/analysis/run_visualize_dual_aperture_dual_ckpt.sh
 # Override any variable by exporting it before running, e.g.
 #   RESUME_A=... RESUME_B=... BASELINE_RESUME_A=... BASELINE_RESUME_B=... IMG_ROW_1=... bash ...
+# Smaller PDF: defaults use dpi 240 and 14×8.8 in; optional COMPACT=1 or PDF_SLIM_FONTS=1.
+# Baseline FN from CaS is on by default; MARK_BASELINE_FAILURE_FROM_CAS=0 turns it off.
 
 ROOT_DIR="/root/autodl-tmp/CaS_DETR"
 cd "${ROOT_DIR}"
@@ -17,7 +19,7 @@ RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/ablation/cas_deim_moe4_cass_c
 CONFIG_B="${CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml}"
 RESUME_B="${RESUME_B:-experiments/CaS-DETR/outputs/ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac/best_stg2.pth}"
 
-# Baseline models for the last column.
+# Baseline models for the baseline column, third panel after original and heatmap.
 BASELINE_CONFIG_A="${BASELINE_CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_dairv2x.yml}"
 BASELINE_RESUME_A="${BASELINE_RESUME_A:-experiments/CaS-DETR/outputs/ablation/cas_deim_all_off_hgnetv2_s_dairv2x/best_stg2.pth}"
 BASELINE_CONFIG_B="${BASELINE_CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_uadetrac.yml}"
@@ -29,15 +31,21 @@ EVAL_EPOCH_B="${EVAL_EPOCH_B:-5}"
 BASELINE_EVAL_EPOCH_A="${BASELINE_EVAL_EPOCH_A:-${EVAL_EPOCH_A}}"
 BASELINE_EVAL_EPOCH_B="${BASELINE_EVAL_EPOCH_B:-${EVAL_EPOCH_B}}"
 CONF_THRESHOLD="${CONF_THRESHOLD:-0.3}"
-SAVE_DPI="${SAVE_DPI:-200}"
-FIG_WIDTH="${FIG_WIDTH:-15}"
-FIG_HEIGHT="${FIG_HEIGHT:-9}"
+# Defaults match visualize_dual_aperture_cas_detr.py defaults and --compact dpi for smaller PDFs.
+SAVE_DPI="${SAVE_DPI:-240}"
+FIG_WIDTH="${FIG_WIDTH:-14}"
+FIG_HEIGHT="${FIG_HEIGHT:-8.8}"
+# Set COMPACT=1 to pass --compact so Python also forces PNG zlib 9 and the same dpi or fig overrides.
+COMPACT="${COMPACT:-0}"
+PDF_SLIM_FONTS="${PDF_SLIM_FONTS:-0}"
+# Default 1: red FN on baseline from CaS boxes; 0 disables.
+MARK_BASELINE_FAILURE_FROM_CAS="${MARK_BASELINE_FAILURE_FROM_CAS:-1}"
 OUTPUT_PATH="${OUTPUT_PATH:-experiments/analysis/figure5_qualitative_cas_detr.pdf}"
 
 # Image row order (editable):
 # Row1/Row2 use model A; Row3/Row4 use model B.
-IMG_ROW_1="${IMG_ROW_1:-/root/autodl-fs/datasets/DAIR-V2X/image/000056.jpg}"
-IMG_ROW_2="${IMG_ROW_2:-/root/autodl-fs/datasets/DAIR-V2X/image/010068.jpg}"
+IMG_ROW_1="${IMG_ROW_1:-/root/autodl-fs/datasets/DAIR-V2X/image/004258.jpg}"
+IMG_ROW_2="${IMG_ROW_2:-/root/autodl-fs/datasets/DAIR-V2X/image/007135.jpg}"
 IMG_ROW_3="${IMG_ROW_3:-/root/autodl-fs/datasets/UA-DETRAC_COCO/test/2604.jpg}"
 IMG_ROW_4="${IMG_ROW_4:-/root/autodl-fs/datasets/UA-DETRAC_COCO/test/3963.jpg}"
 
@@ -89,6 +97,17 @@ if [[ -n "${BASELINE_RESUME_B}" ]]; then
     --baseline_resume_b "${BASELINE_RESUME_B}"
     --baseline_eval_epoch_b "${BASELINE_EVAL_EPOCH_B}"
   )
+fi
+
+if [[ "${COMPACT}" == "1" ]]; then
+  PY_ARGS+=(--compact)
+fi
+if [[ "${PDF_SLIM_FONTS}" == "1" ]]; then
+  PY_ARGS+=(--pdf-slim-fonts)
+fi
+
+if [[ "${MARK_BASELINE_FAILURE_FROM_CAS}" == "0" ]]; then
+  PY_ARGS+=(--no-mark-baseline-failure-from-cas)
 fi
 
 python3 "${PY_ARGS[@]}"

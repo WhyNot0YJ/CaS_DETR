@@ -5,6 +5,10 @@ set -euo pipefail
 #
 # Usage:
 #   bash experiments/analysis/run_evaluate_coco_complexity_subsets.sh
+#   bash experiments/analysis/run_evaluate_coco_complexity_subsets.sh \
+#     --plot-out experiments/analysis/scene_complexity_bars.png
+#
+# --plot-out 必须带保存路径，否则不会出图；本脚本会把「额外参数」原样传给 Python。
 #
 # Override any variable by exporting it before running, e.g.
 #   RESUME_DYNAMIC=/path/to.pth bash experiments/analysis/run_evaluate_coco_complexity_subsets.sh
@@ -101,4 +105,4 @@ if [[ -n "${DYNAMIC_KEEP_FALLBACK_JSON}" ]]; then
   CMD+=(--dynamic-keep-fallback-json "${DYNAMIC_KEEP_FALLBACK_JSON}")
 fi
 
-"${CMD[@]}"
+"${CMD[@]}" "$@"

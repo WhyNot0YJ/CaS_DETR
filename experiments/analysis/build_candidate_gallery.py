@@ -294,12 +294,12 @@ def main():
     print(f"Loading OURS model: {args.resume}")
     model, postprocessor, cfg = load_model_and_post(args.config, args.resume, args.device)
     class_names = class_names_from_yaml(cfg.yaml_cfg)
-    colors = colors_for_classes(len(class_names))
+    colors = colors_for_classes(len(class_names), class_names)
 
     print(f"Loading BASELINE model: {args.baseline_resume}")
     b_model, b_postprocessor, b_cfg = load_model_and_post(args.baseline_config, args.baseline_resume, args.device)
     b_class_names = class_names_from_yaml(b_cfg.yaml_cfg)
-    b_colors = colors_for_classes(len(b_class_names))
+    b_colors = colors_for_classes(len(b_class_names), b_class_names)
 
     rows_panels: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str, str]] = []
     index_records: List[Dict[str, Any]] = []
@@ -312,7 +312,7 @@ def main():
             print(f"  [{i + 1}/{len(sampled)}] SKIP missing: {img_path}")
             continue
         try:
-            o1, o2, o3, stat_text = process_single_scenario(
+            o1, o2, o3, stat_text, _cas_l, _cas_b, _cas_s = process_single_scenario(
                 model,
                 postprocessor,
                 img_path,

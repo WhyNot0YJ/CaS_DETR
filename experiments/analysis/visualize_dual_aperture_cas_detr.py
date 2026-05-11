@@ -3,7 +3,7 @@
 4x4 paper-style qualitative figure for CaS-DETR checkpoints (YAMLConfig + .pth).
 
 Rows: four input images. Columns: original image, S5 coarse heatmap,
-S5 token mask + prediction, and baseline prediction. The baseline column can
+baseline prediction, then S5 token mask + prediction. The baseline column can
 reuse the current model or use a separate checkpoint. Heatmap and mask use the
 last HybridEncoder stage; with a single stage in the config, that stage is used.
 Input to the network is fixed 640x640, same as tools/inference/torch_inf.py stretch resize.
@@ -46,7 +46,189 @@ _spec.loader.exec_module(_train_end_vis)
 DEFAULT_COLORS_BGR = _train_end_vis.DEFAULT_COLORS_BGR
 draw_boxes_bgr_default = _train_end_vis.draw_boxes_bgr
 
+# Per-class BGR overrides. Van keeps DEFAULT_COLORS_BGR; Bus avoids clash with failure red.
+_CLASS_COLOR_OVERRIDE_BGR: Dict[str, Tuple[int, int, int]] = {
+    "bus": (200, 80, 180),
+}
+
 INPUT_SIZE = 640
+
+# Row i uses image_paths[i]. For each row: pick k CaS boxes of this class with smallest y1, then draw them on baseline column.
+_BASELINE_FN_FROM_CAS_SPECS: Sequence[Tuple[str, int]] = (
+    ("Van", 1),
+    ("Motorcyclist", 1),
+    ("car", 1),
+    ("car", 2),
+)
+
+
+def _norm_class_name(name: str) -> str:
+    return name.strip().lower().replace(" ", "_")
+
+
+def pick_topmost_boxes_by_class(
+    labels: np.ndarray,
+    boxes: np.ndarray,
+    scores: np.ndarray,
+    class_names: Sequence[str],
+    target_class: str,
+    k: int,
+) -> np.ndarray:
+    if k <= 0 or len(labels) == 0:
+        return np.zeros((0, 4), dtype=np.float32)
+    want = _norm_class_name(target_class)
+    cand: List[Tuple[float, float, np.ndarray]] = []
+    for label, box, score in zip(labels, boxes, scores):
+        li = int(label)
+        if li < 0 or li >= len(class_names):
+            continue
+        if _norm_class_name(class_names[li]) != want:
+            continue
+        b = np.asarray(box, dtype=np.float32).reshape(4)
+        cand.append((float(b[1]), float(score), b.copy()))
+    if not cand:
+        return np.zeros((0, 4), dtype=np.float32)
+    cand.sort(key=lambda t: (t[0], -t[1]))
+    picked = [t[2] for t in cand[:k]]
+    return np.stack(picked, axis=0)
+
+
+def _draw_dashed_rect_bgr(
+    img: np.ndarray,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    color: Tuple[int, int, int],
+    thickness: int,
+    dash_len: int = 14,
+    gap_len: int = 8,
+) -> None:
+    xi1, yi1 = int(round(x1)), int(round(y1))
+    xi2, yi2 = int(round(x2)), int(round(y2))
+    xi1, xi2 = min(xi1, xi2), max(xi1, xi2)
+    yi1, yi2 = min(yi1, yi2), max(yi1, yi2)
+    t = max(1, int(thickness))
+
+    def hline(y: int, xa: int, xb: int) -> None:
+        x = xa
+        while x < xb:
+            xe = min(x + dash_len, xb)
+            cv2.line(img, (x, y), (xe, y), color, t, cv2.LINE_AA)
+            x = xe + gap_len
+
+    def vline(x: int, ya: int, yb: int) -> None:
+        y = ya
+        while y < yb:
+            ye = min(y + dash_len, yb)
+            cv2.line(img, (x, y), (x, ye), color, t, cv2.LINE_AA)
+            y = ye + gap_len
+
+    hline(yi1, xi1, xi2)
+    hline(yi2, xi1, xi2)
+    vline(xi1, yi1, yi2)
+    vline(xi2, yi1, yi2)
+
+
+def compose_baseline_failure_callout(bgr: np.ndarray, boxes_xyxy: np.ndarray) -> np.ndarray:
+    """Red dashed boxes, Failure Case label, and a zoomed inset from the baseline panel."""
+    if len(boxes_xyxy) == 0:
+        return bgr
+    base = bgr.copy()
+    if not base.flags["C_CONTIGUOUS"]:
+        base = np.ascontiguousarray(base)
+    h, w = base.shape[:2]
+    short = min(h, w)
+    red = (0, 0, 255)
+    th = max(2, int(round(short / 200.0)))
+    out = base.copy()
+
+    for box in boxes_xyxy:
+        x1, y1, x2, y2 = [float(t) for t in box]
+        _draw_dashed_rect_bgr(out, x1, y1, x2, y2, red, th)
+
+    tag = "Failure Case"
+    fs = max(0.55, short / 850.0)
+    txt_th = max(2, int(round(short / 550.0)))
+    bx1, by1 = int(round(float(boxes_xyxy[0][0]))), int(round(float(boxes_xyxy[0][1])))
+    (tw, tht), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, fs, txt_th)
+    pad = max(4, txt_th)
+    tx1 = max(0, min(bx1, w - tw - 2 * pad))
+    ty2 = max(tht + 2 * pad, by1 - pad)
+    ty1 = max(0, ty2 - tht - 2 * pad)
+    tx2 = min(w - 1, tx1 + tw + 2 * pad)
+    cv2.rectangle(out, (tx1, ty1), (tx2, ty2), red, -1, lineType=cv2.LINE_AA)
+    cv2.putText(
+        out,
+        tag,
+        (tx1 + pad, ty2 - pad),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        fs,
+        (255, 255, 255),
+        txt_th,
+        lineType=cv2.LINE_AA,
+    )
+
+    u = boxes_xyxy.astype(np.float64)
+    rx1f, ry1f = float(np.min(u[:, 0])), float(np.min(u[:, 1]))
+    rx2f, ry2f = float(np.max(u[:, 2])), float(np.max(u[:, 3]))
+    bw, bh = max(1.0, rx2f - rx1f), max(1.0, ry2f - ry1f)
+    m = max(0.32 * max(bw, bh), float(min(h, w)) * 0.04, 12.0)
+    x1e = max(0, int(np.floor(rx1f - m)))
+    y1e = max(0, int(np.floor(ry1f - m)))
+    x2e = min(w, int(np.ceil(rx2f + m)))
+    y2e = min(h, int(np.ceil(ry2f + m)))
+    crop = base[y1e:y2e, x1e:x2e]
+    if crop.size == 0:
+        return out
+    ch, cw = crop.shape[:2]
+    inset_max = int(min(h, w) * 0.42)
+    scale = inset_max / max(ch, cw)
+    scale = float(np.clip(scale, 1.12, 3.6))
+    nw, nh = max(1, int(round(cw * scale))), max(1, int(round(ch * scale)))
+    zoom = cv2.resize(crop, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    zth = max(2, int(round(th * scale * 0.85)))
+    for box in boxes_xyxy:
+        zx1 = (float(box[0]) - x1e) * (nw / cw)
+        zy1 = (float(box[1]) - y1e) * (nh / ch)
+        zx2 = (float(box[2]) - x1e) * (nw / cw)
+        zy2 = (float(box[3]) - y1e) * (nh / ch)
+        _draw_dashed_rect_bgr(zoom, zx1, zy1, zx2, zy2, red, zth)
+    (zw, zht), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, fs * 0.92, txt_th)
+    zpad = max(2, int(round(pad * 0.9)))
+    cv2.rectangle(zoom, (4, 4), (6 + zw + 2 * zpad, 6 + zht + 2 * zpad), red, -1, lineType=cv2.LINE_AA)
+    cv2.putText(
+        zoom,
+        tag,
+        (4 + zpad, 4 + zht + zpad),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        fs * 0.92,
+        (255, 255, 255),
+        txt_th,
+        lineType=cv2.LINE_AA,
+    )
+
+    margin = max(6, int(round(short / 100.0)))
+    border = max(2, margin // 2)
+    x0 = w - nw - margin
+    y0 = h - nh - margin
+    if x0 < 0 or y0 < 0 or nw > w or nh > h:
+        return out
+    roi = out[y0 : y0 + nh, x0 : x0 + nw]
+    if roi.shape[0] != nh or roi.shape[1] != nw:
+        return out
+    out[y0 : y0 + nh, x0 : x0 + nw] = zoom
+    bx0 = max(0, x0 - border)
+    by0 = max(0, y0 - border)
+    cv2.rectangle(
+        out,
+        (bx0, by0),
+        (min(w - 1, x0 + nw + border - 1), min(h - 1, y0 + nh + border - 1)),
+        (255, 255, 255),
+        border,
+        lineType=cv2.LINE_AA,
+    )
+    return out
 
 
 def draw_boxes_bgr_hd(
@@ -143,10 +325,20 @@ def class_names_from_yaml(yaml_cfg: Dict[str, Any]) -> List[str]:
     return [f"class_{i}" for i in range(n)]
 
 
-def colors_for_classes(n: int) -> List[Tuple[int, int, int]]:
+def colors_for_classes(
+    n: int,
+    class_names: Optional[Sequence[str]] = None,
+) -> List[Tuple[int, int, int]]:
     out: List[Tuple[int, int, int]] = []
     for i in range(n):
         out.append(DEFAULT_COLORS_BGR[i % len(DEFAULT_COLORS_BGR)])
+    if class_names is not None:
+        for i, name in enumerate(class_names):
+            if i >= len(out):
+                break
+            key = _norm_class_name(str(name))
+            if key in _CLASS_COLOR_OVERRIDE_BGR:
+                out[i] = _CLASS_COLOR_OVERRIDE_BGR[key]
     return out
 
 
@@ -339,7 +531,7 @@ def process_single_scenario(
     class_names: Sequence[str],
     colors: Sequence[Tuple[int, int, int]],
     verbose: bool,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, str]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, str, np.ndarray, np.ndarray, np.ndarray]:
     orig_bgr, orig_target_sizes, outputs, kept_per_level, pruner = run_model_inference(
         model,
         image_path,
@@ -425,7 +617,7 @@ def process_single_scenario(
         colors,
     )
 
-    return orig_bgr.copy(), s5_overlay, pred_overlay, stat_text
+    return orig_bgr.copy(), s5_overlay, pred_overlay, stat_text, labels, boxes, scores
 
 
 def build_baseline_overlay(
@@ -467,6 +659,10 @@ def run_qualitative_4x4_grid(
     save_dpi: int,
     fig_width: float,
     fig_height: float,
+    jpeg_quality: int = 85,
+    png_compress_level: int = 6,
+    pdf_slim_fonts: bool = False,
+    mark_baseline_failure_from_cas: bool = True,
 ) -> None:
     import matplotlib
 
@@ -474,22 +670,35 @@ def run_qualitative_4x4_grid(
     import matplotlib.pyplot as plt
 
     matplotlib.rcParams["pdf.compression"] = 9
-    matplotlib.rcParams["pdf.fonttype"] = 42  # embed TrueType so text stays editable
+    out_suffix = Path(output_path).suffix.lower()
+    if out_suffix == ".pdf" and pdf_slim_fonts:
+        # Fewer font bytes in the PDF; panel images still use PNG Flate inside the file.
+        matplotlib.rcParams["pdf.use14corefonts"] = True
+        matplotlib.rcParams["pdf.fonttype"] = 42
+    else:
+        matplotlib.rcParams["pdf.use14corefonts"] = False
+        matplotlib.rcParams["pdf.fonttype"] = 42  # embed TrueType so text stays editable
     matplotlib.rcParams["ps.fonttype"] = 42
     matplotlib.rcParams["font.family"] = "serif"
     matplotlib.rcParams["font.serif"] = ["Times New Roman", "DejaVu Serif", "serif"]
-    # Disable default antialiased resampling on imshow so box edges stay sharp.
-    matplotlib.rcParams["image.interpolation"] = "none"
-    matplotlib.rcParams["image.resample"] = False
+    # interpolation "none" triggers unsampled PDF embedding of the full numpy array, ignoring savefig dpi
+    # and inflating files to tens of MB. "nearest" resamples to the figure dpi and keeps hard box edges.
+    matplotlib.rcParams["image.interpolation"] = "nearest"
+    matplotlib.rcParams["image.resample"] = True
 
     fig, axes = plt.subplots(nrows=4, ncols=4, figsize=(fig_width, fig_height))
-    plt.subplots_adjust(wspace=0.01, hspace=0.05)
+    plt.subplots_adjust(wspace=0.01, hspace=0.05, bottom=0.085)
+    if mark_baseline_failure_from_cas:
+        print(
+            "Baseline failure callouts: ON — red dashed boxes from CaS positions, zoom inset, "
+            "see row warnings if a class has no detection above --conf_threshold."
+        )
 
     col_titles = [
         "Original Image",
         "Importance Map $S_5$",
-        r"$S_5$ Token Mask + Prediction",
         "Baseline Prediction",
+        r"$S_5$ Token Mask + Prediction",
     ]
 
     for row, image_path_str in enumerate(image_paths):
@@ -497,7 +706,7 @@ def run_qualitative_4x4_grid(
         print(f"Processing row {row + 1}/4: {p}")
         model, postprocessor, class_names, colors, eval_epoch = row_model_bundle[row]
         baseline_model, baseline_postprocessor, baseline_class_names, baseline_colors, baseline_eval_epoch = baseline_row_model_bundle[row]
-        o1, o2, o3, stat_text = process_single_scenario(
+        o1, o2, o3, stat_text, cas_labels, cas_boxes, cas_scores = process_single_scenario(
             model,
             postprocessor,
             p,
@@ -518,16 +727,46 @@ def run_qualitative_4x4_grid(
             baseline_class_names,
             baseline_colors,
         )
-        imgs = [o1, o2, o3, o4]
+        if mark_baseline_failure_from_cas and row < len(_BASELINE_FN_FROM_CAS_SPECS):
+            tcls, tk = _BASELINE_FN_FROM_CAS_SPECS[row]
+            fn_boxes = pick_topmost_boxes_by_class(
+                cas_labels,
+                cas_boxes,
+                cas_scores,
+                class_names,
+                tcls,
+                tk,
+            )
+            if len(fn_boxes) == 0:
+                print(
+                    f"  Warning: row {row} no CaS prediction for class '{tcls}'; "
+                    "baseline column left without failure highlight."
+                )
+            else:
+                if len(fn_boxes) < tk:
+                    print(
+                        f"  Warning: row {row} wanted {tk} '{tcls}' box(es); "
+                        f"CaS only has {len(fn_boxes)} above conf threshold."
+                    )
+                o4 = compose_baseline_failure_callout(o4, fn_boxes)
+                print(
+                    f"  Baseline column: failure callout for {len(fn_boxes)} CaS '{tcls}' box(es)."
+                )
+        imgs = [o1, o2, o4, o3]
         for col, (ax, img) in enumerate(zip(axes[row], imgs)):
             ax.imshow(
                 cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
-                interpolation="none",
-                resample=False,
+                interpolation="nearest",
+                resample=True,
             )
-            if row == 0:
-                ax.set_title(col_titles[col], fontweight="bold", fontfamily="serif")
-            if stat_text and col == 2:
+            if row == len(image_paths) - 1:
+                ax.set_title(
+                    col_titles[col],
+                    y=-0.18,
+                    fontweight="bold",
+                    fontfamily="serif",
+                )
+            if stat_text and col == 3:
                 add_panel_badge(ax, stat_text)
             ax.set_xticks([])
             ax.set_yticks([])
@@ -543,7 +782,13 @@ def run_qualitative_4x4_grid(
     suffix = out_path.suffix.lower()
     if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
         save_kwargs["format"] = suffix.lstrip(".")
-    # For PDF output, keep vector text/lines; raster images embedded at save_dpi.
+    jq = max(1, min(95, int(jpeg_quality)))
+    pcl = max(0, min(9, int(png_compress_level)))
+    if suffix in {".jpg", ".jpeg"}:
+        save_kwargs["pil_kwargs"] = {"quality": jq, "optimize": True}
+    elif suffix == ".png":
+        save_kwargs["pil_kwargs"] = {"compress_level": pcl}
+    # PDF keeps vector text; panel photos are rasterized at save_dpi, so lower dpi or inches for smaller PDF.
     plt.savefig(str(out_path), **save_kwargs)
     plt.close()
     print(f"Saved: {out_path}")
@@ -594,7 +839,12 @@ def main():
     parser.add_argument("--baseline_config_b", type=str, default=None, help="Optional second baseline config for rows after split_index")
     parser.add_argument("--baseline_resume_b", type=str, default=None, help="Optional second baseline checkpoint for rows after split_index")
     parser.add_argument("--split_index", type=int, default=2, help="Rows [0:split_index] use model A, remaining use model B")
-    parser.add_argument("--output", type=str, default="figure5_qualitative_cas_detr.pdf")
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="figure5_qualitative_cas_detr.pdf",
+        help="Path to save the figure. Default is PDF; use --compact for a smaller PDF.",
+    )
     parser.add_argument("--images", type=str, nargs="+", default=None, help="Exactly 4 image paths in row order")
     parser.add_argument("--image", type=str, default=None, help="Single image path (backward compatibility)")
     parser.add_argument("--image_dir", type=str, default=".", help="Base directory for ./image/")
@@ -605,10 +855,65 @@ def main():
     parser.add_argument("--baseline_eval_epoch", type=int, default=None, help="Optional eval epoch for baseline model")
     parser.add_argument("--baseline_eval_epoch_b", type=int, default=None, help="Optional eval epoch for second baseline model")
     parser.add_argument("--conf_threshold", type=float, default=0.3)
-    parser.add_argument("--dpi", type=int, default=300, help="Save DPI. For PDF, images are embedded at this DPI while lines/text stay vector.")
-    parser.add_argument("--fig_width", type=float, default=18.0, help="Figure width in inches")
-    parser.add_argument("--fig_height", type=float, default=11.0, help="Figure height in inches")
+    parser.add_argument(
+        "--dpi",
+        type=int,
+        default=240,
+        help="Save DPI. Lower values shrink raster bytes in PDF or PNG.",
+    )
+    parser.add_argument("--fig_width", type=float, default=14.0, help="Figure width in inches")
+    parser.add_argument("--fig_height", type=float, default=8.8, help="Figure height in inches")
+    parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=85,
+        metavar="Q",
+        help="JPEG quality 1 to 95 when --output ends with .jpg or .jpeg. Lower is smaller.",
+    )
+    parser.add_argument(
+        "--png-compress-level",
+        type=int,
+        default=6,
+        metavar="L",
+        help="PNG zlib level 0 to 9 when --output ends with .png. 9 gives smallest PNG.",
+    )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Smaller PDF or PNG: dpi 240, fig 14×8.8 in, PNG zlib 9. Overrides --dpi and figure size. For .jpg only, caps jpeg quality at 80.",
+    )
+    parser.add_argument(
+        "--pdf-slim-fonts",
+        action="store_true",
+        help="PDF only: use standard PDF core fonts to shrink file size; title or math may look slightly different.",
+    )
+    parser.add_argument(
+        "--mark-baseline-failure-from-cas",
+        dest="mark_baseline_failure_from_cas",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Draw failure callouts on the baseline panel using CaS box locations from the CaS panel. "
+            "Default on; use --no-mark-baseline-failure-from-cas to disable. "
+            "Row or class list: _BASELINE_FN_FROM_CAS_SPECS."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.compact:
+        args.dpi = 240
+        args.fig_width = 14.0
+        args.fig_height = 8.8
+        args.png_compress_level = max(int(args.png_compress_level), 9)
+        out_sfx = Path(args.output).suffix.lower()
+        if out_sfx in {".jpg", ".jpeg"}:
+            args.jpeg_quality = min(int(args.jpeg_quality), 80)
+        print(
+            f"Compact preset: dpi=240, fig 14×8.8 in, png_compress_level={args.png_compress_level}"
+            + (f", jpeg_quality={args.jpeg_quality}" if out_sfx in {'.jpg', '.jpeg'} else "")
+            + ("; PDF output" if out_sfx == ".pdf" else "")
+            + f" → {args.output}"
+        )
 
     if args.images:
         paths = _validate_images(args.images)
@@ -625,7 +930,7 @@ def main():
 
     model_a, postprocessor_a, cfg_a = load_model_and_post(args.config, args.resume, args.device)
     class_names_a = class_names_from_yaml(cfg_a.yaml_cfg)
-    colors_a = colors_for_classes(len(class_names_a))
+    colors_a = colors_for_classes(len(class_names_a), class_names_a)
     eval_epoch_a = int(args.eval_epoch)
 
     model_b, postprocessor_b, class_names_b, colors_b = model_a, postprocessor_a, class_names_a, colors_a
@@ -634,7 +939,7 @@ def main():
         config_b = args.config_b or args.config
         model_b, postprocessor_b, cfg_b = load_model_and_post(config_b, args.resume_b, args.device)
         class_names_b = class_names_from_yaml(cfg_b.yaml_cfg)
-        colors_b = colors_for_classes(len(class_names_b))
+        colors_b = colors_for_classes(len(class_names_b), class_names_b)
 
     baseline_model_a = model_a
     baseline_postprocessor_a = postprocessor_a
@@ -649,7 +954,7 @@ def main():
             args.device,
         )
         baseline_class_names_a = class_names_from_yaml(baseline_cfg_a.yaml_cfg)
-        baseline_colors_a = colors_for_classes(len(baseline_class_names_a))
+        baseline_colors_a = colors_for_classes(len(baseline_class_names_a), baseline_class_names_a)
 
     baseline_model_b = baseline_model_a if args.baseline_resume else model_b
     baseline_postprocessor_b = baseline_postprocessor_a if args.baseline_resume else postprocessor_b
@@ -669,7 +974,7 @@ def main():
             args.device,
         )
         baseline_class_names_b = class_names_from_yaml(baseline_cfg_b.yaml_cfg)
-        baseline_colors_b = colors_for_classes(len(baseline_class_names_b))
+        baseline_colors_b = colors_for_classes(len(baseline_class_names_b), baseline_class_names_b)
 
     split_index = max(0, min(4, int(args.split_index)))
     row_model_bundle: List[Tuple[torch.nn.Module, torch.nn.Module, Sequence[str], Sequence[Tuple[int, int, int]], int]] = []
@@ -708,6 +1013,10 @@ def main():
         args.dpi,
         args.fig_width,
         args.fig_height,
+        args.jpeg_quality,
+        args.png_compress_level,
+        args.pdf_slim_fonts,
+        args.mark_baseline_failure_from_cas,
     )
 
 
