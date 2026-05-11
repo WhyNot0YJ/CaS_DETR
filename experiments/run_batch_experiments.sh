@@ -27,6 +27,7 @@ export OMP_NUM_THREADS=1
 #   ./run_batch_experiments.sh --cas_pack_moe4_base03_a10      # 打包：moe4 base03_a10 双数据集 + moe4_only + cass_only_caip base03_a10（不含 keep*_fixed）
 #   ./run_batch_experiments.sh --cas_fixed_keep_ratio          # 仅 DAIR：moe4 base03_a10 + keep0.3/0.7 固定（与 pack 分开跑）
 #   ./run_batch_experiments.sh --cas_moe4_base03_a10_fixed_keep  # 同上别名
+#   ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 总参数量扫描：固定 num_experts=4/top_k=2，扫 cap05x/cap1x/cap2x（dim_ff=128/256/512，DAIR-V2X；cap4x 已跑过，不包含）
 #   ./run_batch_experiments.sh --yolov5                        # 只运行YOLOv5实验
 #   ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8实验
 #   ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12实验
@@ -275,6 +276,17 @@ declare -a CAS_CAIP_BASE05_EXPERIMENTS=(
 declare -a CAS_FIXED_KEEP_RATIO_EXPERIMENTS=(
     "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x.yml"
     "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x.yml"
+)
+
+# MoE 总参数量扫描：仅扫 dim_feedforward（每个专家 FFN 中间层维度）
+# 倍数定义：MoE 层总参数 / 普通单 FFN 参数 = num_experts * dim_feedforward / 1024
+# 单一变量对照：num_experts=4, moe_top_k=2 不变；其余 CAS/CAIP/CASS 与 base05_a10 基线一致
+# cap4x（dim_ff=1024）= 当前默认，已跑过，不重复跑；与 cap05x/cap1x/cap2x 结果合并画曲线
+# 用于回答：精度是否与 MoE 总专家容量相关？降到与稠密 FFN 同参、甚至 1/2 同参时是否仍有增益？
+declare -a CAS_MOE_CAPACITY_SCAN_EXPERIMENTS=(
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap1x_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap2x_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml"
 )
 
 # 快速打包：base03_a10 moe4 主线（不含 keep*_fixed；固定 keep 见 CAS_FIXED_KEEP_RATIO_EXPERIMENTS）
@@ -719,6 +731,7 @@ parse_arguments() {
     local has_cas_caip_base05=false
     local has_cas_pack_moe4_base03_a10=false
     local has_cas_fixed_keep_ratio=false
+    local has_cas_moe_capacity_scan=false
     local has_yolov5=false
     local has_yolov8=false
     local has_yolov12=false
@@ -751,6 +764,9 @@ parse_arguments() {
                 ;;
             --cas_fixed_keep_ratio|--cas-fixed-keep-ratio|--cas_moe4_base03_a10_fixed_keep|--cas-moe4-base03-a10-fixed-keep)
                 has_cas_fixed_keep_ratio=true
+                ;;
+            --cas_moe_capacity_scan|--cas-moe-capacity-scan|--cas_moe_ffn_scan|--cas-moe-ffn-scan)
+                has_cas_moe_capacity_scan=true
                 ;;
             --yolov5)
                 has_yolov5=true
@@ -786,7 +802,7 @@ parse_arguments() {
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
@@ -795,6 +811,7 @@ parse_arguments() {
         [ "$has_cas_caip_base05" = true ] && selected_types+=("CaS_DETR_CAIP_rbase0.5_a1.0")
         [ "$has_cas_pack_moe4_base03_a10" = true ] && selected_types+=("CaS_DETR_PACK_moe4_base03_a10")
         [ "$has_cas_fixed_keep_ratio" = true ] && selected_types+=("CaS_DETR_FIXED_keep_ratio")
+        [ "$has_cas_moe_capacity_scan" = true ] && selected_types+=("CaS_DETR_MOE_CAPACITY_SCAN")
         [ "$has_yolov5" = true ] && selected_types+=("YOLOv5")
         [ "$has_yolov8" = true ] && selected_types+=("YOLOv8")
         [ "$has_yolov12" = true ] && selected_types+=("YOLOv12")
@@ -859,6 +876,15 @@ parse_arguments() {
         if [ "$has_cas_fixed_keep_ratio" = true ]; then
             local _p
             for _p in "${CAS_FIXED_KEEP_RATIO_EXPERIMENTS[@]}"; do
+                if filter_config "$_p"; then
+                    CONFIGS_TO_RUN+=("$_p")
+                fi
+            done
+        fi
+
+        if [ "$has_cas_moe_capacity_scan" = true ]; then
+            local _p
+            for _p in "${CAS_MOE_CAPACITY_SCAN_EXPERIMENTS[@]}"; do
                 if filter_config "$_p"; then
                     CONFIGS_TO_RUN+=("$_p")
                 fi
@@ -1046,6 +1072,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --cas_caip_base05               # 只运行 CAIP 消融：r_base=0.5, alpha=1.0（4 个配置，DAIR+UA）"
         echo "  ./run_batch_experiments.sh --cas_pack_moe4_base03_a10      # moe4 base03_a10 打包（不含 keep 固定分支）"
         echo "  ./run_batch_experiments.sh --cas_fixed_keep_ratio          # 仅 DAIR：moe4 base03_a10 keep0.3、0.7 固定（独立入口）"
+        echo "  ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 总参数量扫描：cap05x/cap1x/cap2x（dim_ff=128/256/512，仅 DAIR；cap4x 已跑）"
         echo "  ./run_batch_experiments.sh --yolov5                        # 只运行YOLOv5"
         echo "  ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8"
         echo "  ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12"
