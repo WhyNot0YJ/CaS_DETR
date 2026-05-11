@@ -280,13 +280,13 @@ declare -a CAS_FIXED_KEEP_RATIO_EXPERIMENTS=(
 
 # MoE 总参数量扫描：仅扫 dim_feedforward（每个专家 FFN 中间层维度）
 # 倍数定义：MoE 层总参数 / 普通单 FFN 参数 = num_experts * dim_feedforward / 1024
-# 单一变量对照：num_experts=4, moe_top_k=2 不变；其余 CAS/CAIP/CASS 与 base05_a10 基线一致
+# 单一变量对照：num_experts=4, moe_top_k=2 不变；其余 CAS/CAIP/CASS 与 base03_a10 基线一致
 # cap4x（dim_ff=1024）= 当前默认，已跑过，不重复跑；与 cap05x/cap1x/cap2x 结果合并画曲线
 # 用于回答：精度是否与 MoE 总专家容量相关？降到与稠密 FFN 同参、甚至 1/2 同参时是否仍有增益？
 declare -a CAS_MOE_CAPACITY_SCAN_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap1x_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap2x_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
 )
 
 # 快速打包：base03_a10 moe4 主线（不含 keep*_fixed；固定 keep 见 CAS_FIXED_KEEP_RATIO_EXPERIMENTS）

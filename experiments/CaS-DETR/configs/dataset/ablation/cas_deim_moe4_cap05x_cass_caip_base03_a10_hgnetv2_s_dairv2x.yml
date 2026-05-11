@@ -3,7 +3,7 @@ __include__: [
   '../../base/cas_deim.yml'
 ]
 
-output_dir: ./outputs/ablation/cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2_s_dairv2x
+output_dir: ./outputs/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x
 
 # MoE 总参数量扫描（0.5x = 普通单 FFN 的一半参数量）
 # 倍数定义：MoE 层总参数 / 普通单 FFN 参数 = num_experts * dim_feedforward / 1024
@@ -14,7 +14,7 @@ output_dir: ./outputs/ablation/cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2
 
 HybridEncoder:
   enable_cas_predictor: True
-  token_keep_ratio: 0.5
+  token_keep_ratio: 0.3
   use_caip: True
   caip_complexity_alpha: 1.0
   caip_dynamic_warmup_epochs: 4
