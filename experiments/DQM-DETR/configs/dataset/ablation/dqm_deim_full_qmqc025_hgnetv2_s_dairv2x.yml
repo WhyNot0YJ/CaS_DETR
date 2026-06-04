@@ -1,0 +1,8 @@
+__include__: [
+  './dqm_deim_full_default_hgnetv2_s_dairv2x.yml',
+]
+
+output_dir: ./outputs/ablation/dqm_deim_full_qmqc025_hgnetv2_s_dairv2x
+
+DQMDEIMCriterion:
+  qmqc_weight: 0.25
