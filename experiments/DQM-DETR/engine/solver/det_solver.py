@@ -72,6 +72,8 @@ class DetSolver(BaseSolver):
                 self.device
             )
             for k in test_stats:
+                if k.startswith('weather_'):
+                    continue
                 best_stat['epoch'] = self.last_epoch
                 best_stat[k] = test_stats[k][0]
                 top1 = test_stats[k][0]
@@ -138,6 +140,9 @@ class DetSolver(BaseSolver):
                 if self.writer and dist_utils.is_main_process():
                     for i, v in enumerate(test_stats[k]):
                         self.writer.add_scalar(f'Test/{k}_{i}'.format(k), v, epoch)
+
+                if k.startswith('weather_'):
+                    continue
 
                 if k in best_stat:
                     best_stat['epoch'] = epoch if test_stats[k][0] > best_stat[k] else best_stat['epoch']

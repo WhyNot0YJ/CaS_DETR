@@ -587,8 +587,46 @@ class BaseYOLOTrainer(ABC):
             fieldnames.append(f'AP50_{name}')
             fieldnames.append(f'AP5095_{name}')
 
+        def _weather_metric_key(value: str) -> str:
+            key = ''.join(ch.lower() if ch.isalnum() else '_' for ch in str(value))
+            key = '_'.join(part for part in key.split('_') if part)
+            return key or 'unknown'
+
+        weather_names: List[str] = []
+        weather_seen = set()
+        for _, _, labels_meta_dir in splits:
+            for meta_path in labels_meta_dir.glob('*.json'):
+                try:
+                    raw_meta = json.loads(meta_path.read_text(encoding='utf-8'))
+                except Exception:
+                    continue
+                if not isinstance(raw_meta, dict):
+                    continue
+                weather = str(raw_meta.get('weather', '')).strip()
+                if weather and weather not in weather_seen:
+                    weather_seen.add(weather)
+                    weather_names.append(weather)
+        weather_names = sorted(weather_names)
+        for weather in weather_names:
+            weather_key = _weather_metric_key(weather)
+            fieldnames.append(f'mAP_50_weather_{weather_key}')
+            fieldnames.append(f'mAP_5095_weather_{weather_key}')
+
         summary_csv = self.log_dir.parent / 'eval_metrics.csv'
         write_header = not summary_csv.exists() or summary_csv.stat().st_size == 0
+        if summary_csv.exists() and summary_csv.stat().st_size > 0:
+            with summary_csv.open('r', newline='', encoding='utf-8') as existing_fh:
+                reader = csv.DictReader(existing_fh)
+                existing_fieldnames = reader.fieldnames or []
+                missing_fieldnames = [name for name in fieldnames if name not in existing_fieldnames]
+                if missing_fieldnames:
+                    existing_rows = list(reader)
+                    fieldnames = existing_fieldnames + missing_fieldnames
+                    with summary_csv.open('w', newline='', encoding='utf-8') as rewrite_fh:
+                        rewrite_writer = csv.DictWriter(rewrite_fh, fieldnames=fieldnames, extrasaction='ignore')
+                        rewrite_writer.writeheader()
+                        rewrite_writer.writerows(existing_rows)
+                    write_header = False
         last_metrics: Dict[str, Any] = {}
 
         with summary_csv.open('a', newline='', encoding='utf-8') as fh:
@@ -627,6 +665,7 @@ class BaseYOLOTrainer(ABC):
                 img_sizes: Dict[int, Tuple[int, int]] = {}
                 coco_annotations: List[Dict[str, Any]] = []
                 coco_predictions: List[Dict[str, Any]] = []
+                weather_by_image_id: Dict[int, str] = {}
                 ann_id = 0
 
                 BATCH = 32
@@ -649,6 +688,9 @@ class BaseYOLOTrainer(ABC):
                             entries = raw
                         elif isinstance(raw, dict) and 'objects' in raw:
                             entries = raw['objects']
+                            weather = str(raw.get('weather', '')).strip()
+                            if weather:
+                                weather_by_image_id[img_idx] = weather
                         else:
                             entries = []
 
@@ -826,6 +868,52 @@ class BaseYOLOTrainer(ABC):
                         metrics[f'AP50_{nm}'] = per_cat_50.get(nm, 0.0)
                         metrics[f'AP5095_{nm}'] = per_cat_5095.get(nm, 0.0)
 
+                weather_log_parts_50 = []
+                weather_log_parts_5095 = []
+                for weather in weather_names:
+                    image_ids = {
+                        image_id
+                        for image_id, image_weather in weather_by_image_id.items()
+                        if image_weather == weather
+                    }
+                    if not image_ids:
+                        continue
+                    sub_annotations = [
+                        ann for ann in coco_annotations if ann['image_id'] in image_ids
+                    ]
+                    sub_predictions = [
+                        pred for pred in coco_predictions if pred['image_id'] in image_ids
+                    ]
+                    sub_gt = {
+                        'images': [
+                            {
+                                'id': image_id,
+                                'width': img_sizes[image_id][0],
+                                'height': img_sizes[image_id][1],
+                            }
+                            for image_id in sorted(image_ids)
+                            if image_id in img_sizes
+                        ],
+                        'categories': categories_coco,
+                        'annotations': sub_annotations,
+                    }
+                    sub_eval = run_coco_bbox_eval(sub_gt, sub_predictions)
+                    if sub_eval is None:
+                        ap50 = 0.0
+                        ap5095 = 0.0
+                    else:
+                        ap50 = coco_ap_at_iou50_all(sub_eval)
+                        ap5095 = (
+                            max(0.0, float(sub_eval.stats[0]))
+                            if len(sub_eval.stats) > 0
+                            else 0.0
+                        )
+                    weather_key = _weather_metric_key(weather)
+                    metrics[f'mAP_50_weather_{weather_key}'] = ap50
+                    metrics[f'mAP_5095_weather_{weather_key}'] = ap5095
+                    weather_log_parts_50.append(f'{weather}={ap50:.4f}')
+                    weather_log_parts_5095.append(f'{weather}={ap5095:.4f}')
+
                 metrics['eval_split'] = eval_split
                 merge_benchmark_dict_into_metrics(metrics, bench_dict)
 
@@ -844,6 +932,15 @@ class BaseYOLOTrainer(ABC):
                 )
                 self.logger.info(f"📋 [{eval_split}] Per-class AP@0.5:  {cls_50_str}")
                 self.logger.info(f"📋 [{eval_split}] Per-class AP@0.5:0.95:  {cls_5095_str}")
+                if weather_log_parts_50:
+                    self.logger.info(
+                        f"[{eval_split}] Weather AP@0.5:  "
+                        + ' | '.join(weather_log_parts_50)
+                    )
+                    self.logger.info(
+                        f"[{eval_split}] Weather AP@0.5:0.95:  "
+                        + ' | '.join(weather_log_parts_5095)
+                    )
                 if (bm_line := format_benchmark_eval_line(metrics)):
                     self.logger.info(bm_line)
 

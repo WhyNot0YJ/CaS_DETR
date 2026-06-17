@@ -1,6 +1,6 @@
-# data_yaml：train / val 供 Ultralytics 训练与每轮验证；若含 test 与 labels_meta/test，
-# 则 KITTI/多尺度 mAP 仅在训练结束后在 test 上评一次（见 base_yolo_trainer）。
-# coco_data_root / detr_dataset_class / num_classes：供 RT-DETR / MoE-RT-DETR / CaS_DETR（见各 train.py）。
+# data_yaml: train/val for Ultralytics training and validation.
+# test plus labels_meta/test enables post-training test mAP in base_yolo_trainer.
+# coco_data_root / detr_dataset_class / num_classes are shared by DETR-style runners.
 datasets:
   dairv2x:
     aliases:

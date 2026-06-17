@@ -9,6 +9,7 @@ Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 
 import sys
 import math
+from collections import defaultdict
 from typing import Iterable
 
 import torch
@@ -19,6 +20,21 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from ..optim import ModelEMA, Warmup
 from ..data import CocoEvaluator
 from ..misc import MetricLogger, SmoothedValue, dist_utils
+
+
+def _build_weather_evaluators(coco_evaluator: CocoEvaluator):
+    images = coco_evaluator.coco_gt.dataset.get("images", [])
+    weather_to_img_ids = defaultdict(set)
+    for image in images:
+        weather = image.get("weather")
+        if weather:
+            weather_to_img_ids[str(weather)].add(int(image["id"]))
+
+    evaluators = {}
+    for weather, image_ids in sorted(weather_to_img_ids.items()):
+        evaluator = coco_evaluator.__class__(coco_evaluator.coco_gt, coco_evaluator.iou_types)
+        evaluators[weather] = (image_ids, evaluator)
+    return evaluators
 
 
 def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, criterion: torch.nn.Module,
@@ -150,6 +166,7 @@ def evaluate(model: torch.nn.Module, criterion: torch.nn.Module, postprocessor, 
     model.eval()
     criterion.eval()
     coco_evaluator.cleanup()
+    weather_evaluators = _build_weather_evaluators(coco_evaluator) if coco_evaluator is not None else {}
 
     metric_logger = MetricLogger(delimiter="  ")
     # metric_logger.add_meter('class_error', SmoothedValue(window_size=1, fmt='{value:.2f}'))
@@ -177,17 +194,27 @@ def evaluate(model: torch.nn.Module, criterion: torch.nn.Module, postprocessor, 
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}
         if coco_evaluator is not None:
             coco_evaluator.update(res)
+            for image_ids, weather_evaluator in weather_evaluators.values():
+                subset_res = {image_id: output for image_id, output in res.items() if int(image_id) in image_ids}
+                if subset_res:
+                    weather_evaluator.update(subset_res)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     if coco_evaluator is not None:
         coco_evaluator.synchronize_between_processes()
+        for _, weather_evaluator in weather_evaluators.values():
+            weather_evaluator.synchronize_between_processes()
 
     # accumulate predictions from all images
     if coco_evaluator is not None:
         coco_evaluator.accumulate()
         coco_evaluator.summarize()
+        for weather, (_, weather_evaluator) in weather_evaluators.items():
+            print(f"Weather subset: {weather}")
+            weather_evaluator.accumulate()
+            weather_evaluator.summarize()
 
     stats = {}
     # stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
@@ -196,5 +223,11 @@ def evaluate(model: torch.nn.Module, criterion: torch.nn.Module, postprocessor, 
             stats['coco_eval_bbox'] = coco_evaluator.coco_eval['bbox'].stats.tolist()
         if 'segm' in iou_types:
             stats['coco_eval_masks'] = coco_evaluator.coco_eval['segm'].stats.tolist()
+        for weather, (_, weather_evaluator) in weather_evaluators.items():
+            key = weather.lower().replace(" ", "_")
+            if 'bbox' in iou_types:
+                stats[f'weather_{key}_coco_eval_bbox'] = weather_evaluator.coco_eval['bbox'].stats.tolist()
+            if 'segm' in iou_types:
+                stats[f'weather_{key}_coco_eval_masks'] = weather_evaluator.coco_eval['segm'].stats.tolist()
 
     return stats, coco_evaluator
