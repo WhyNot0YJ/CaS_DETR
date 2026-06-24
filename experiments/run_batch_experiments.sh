@@ -1438,6 +1438,11 @@ run_single_experiment() {
             pretrained_arg="-t ${DFINE_TUNING_CKPT}"
         fi
 
+        # DQM-DETR 训练显存紧张，开启 expandable_segments 回收碎片
+        if [[ "$WORK_DIR" == "DQM-DETR" ]]; then
+            export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+        fi
+
         if [ "$TEST_MODE" = true ]; then
             "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg -u epoches=2
         else
