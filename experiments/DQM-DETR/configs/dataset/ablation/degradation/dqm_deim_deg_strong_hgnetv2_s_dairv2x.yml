@@ -14,3 +14,4 @@ train_dataloader:
     blur_kernel: 5
     blur_sigma_range: [0.8, 1.8]
     fog_alpha_range: [0.15, 0.35]
+

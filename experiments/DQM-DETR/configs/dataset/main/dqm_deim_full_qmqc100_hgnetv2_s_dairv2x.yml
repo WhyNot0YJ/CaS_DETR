@@ -6,3 +6,4 @@ output_dir: ./outputs/main/dqm_deim_full_qmqc100_hgnetv2_s_dairv2x
 
 DQMDEIMCriterion:
   qmqc_weight: 1.0
+

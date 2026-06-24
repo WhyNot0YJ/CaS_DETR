@@ -66,3 +66,7 @@ train_dataloader:
 vis_after_train: True
 vis_num_images: 8
 vis_score_thr: 0.35
+
+cross_domain_eval:
+  enable: true
+  config: configs/dataset/dawn_eval_from_dair.yml
