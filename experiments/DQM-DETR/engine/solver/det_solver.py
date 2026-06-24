@@ -147,13 +147,17 @@ class DetSolver(BaseSolver):
                     dist_utils.save_on_master(self.state_dict(), checkpoint_path)
 
             module = self.ema.module if self.ema else self.model
+            ws_cfg = self.cfg.yaml_cfg.get('weather_subset_eval') if hasattr(self.cfg, 'yaml_cfg') else None
+            ws_every = int(ws_cfg.get('every_n_epochs', 1)) if ws_cfg else 1
+            compute_ws = ws_every <= 1 or (epoch + 1) % ws_every == 0
             test_stats, coco_evaluator = evaluate(
                 module,
                 self.criterion,
                 self.postprocessor,
                 self.val_dataloader,
                 self.evaluator,
-                self.device
+                self.device,
+                compute_weather_subsets=compute_ws,
             )
 
             weather_line = _format_weather_summary(test_stats)
@@ -211,6 +215,14 @@ class DetSolver(BaseSolver):
                 'n_parameters': n_parameters
             }
 
+            cd_cfg = self.cfg.yaml_cfg.get('cross_domain_eval') if hasattr(self.cfg, 'yaml_cfg') else None
+            cd_every = int(cd_cfg.get('every_n_epochs', 0)) if cd_cfg and cd_cfg.get('enable', True) else 0
+            if cd_every > 0 and (epoch + 1) % cd_every == 0 and dist_utils.is_main_process():
+                module = self.ema.module if self.ema else self.model
+                cd_stats = self._run_cross_domain_eval(module, epoch=epoch, dump_json=False)
+                if cd_stats:
+                    log_stats.update({f'cd_{k}': v for k, v in cd_stats.items()})
+
             if self.output_dir and dist_utils.is_main_process():
                 with (self.output_dir / "log.txt").open("a") as f:
                     f.write(json.dumps(log_stats) + "\n")
@@ -245,17 +257,60 @@ class DetSolver(BaseSolver):
 
     def _maybe_run_cross_domain_eval(self):
         """If `cross_domain_eval: {config: ..., enable: true}` is set in cfg, run evaluate
-        once on a different val_dataloader/evaluator and dump stats. No-op otherwise."""
+        once on a different val_dataloader/evaluator and dump stats. No-op otherwise.
+
+        Used at the end of training. The per-epoch hook calls _run_cross_domain_eval directly.
+        """
         cd_cfg = self.cfg.yaml_cfg.get('cross_domain_eval') if hasattr(self.cfg, 'yaml_cfg') else None
         if not cd_cfg or not cd_cfg.get('enable', True):
             return
         if not dist_utils.is_main_process():
             return
 
+        # Final pass: prefer best_stg2 weights if present; fall back to current EMA.
+        module = self._final_eval_module()
+        self._run_cross_domain_eval(module, epoch=None, dump_json=True)
+
+    def _final_eval_module(self):
+        """Return a model module loaded from best_stg2.pth if it exists, else current EMA/model."""
+        best_path = self.output_dir / 'best_stg2.pth' if self.output_dir else None
+        live_module = self.ema.module if self.ema else self.model
+        if not best_path or not best_path.is_file():
+            print('[CrossDomain] best_stg2.pth not found, using live EMA for final eval')
+            return live_module
+
+        try:
+            state = torch.load(str(best_path), map_location='cpu')
+        except Exception as e:
+            print(f'[CrossDomain] failed to load {best_path}: {e}, using live EMA')
+            return live_module
+
+        if self.ema is not None and 'ema' in state:
+            from copy import deepcopy
+            ema_clone = deepcopy(dist_utils.de_parallel(self.ema))
+            ema_clone.load_state_dict(state['ema'])
+            print(f'[CrossDomain] loaded EMA weights from {best_path.name}')
+            return ema_clone.module
+        if 'model' in state:
+            from copy import deepcopy
+            model_clone = deepcopy(dist_utils.de_parallel(self.model))
+            model_clone.load_state_dict(state['model'])
+            model_clone.eval()
+            print(f'[CrossDomain] loaded model weights from {best_path.name}')
+            return model_clone
+        print(f'[CrossDomain] no ema/model key in {best_path.name}, using live EMA')
+        return live_module
+
+    def _run_cross_domain_eval(self, module, epoch=None, dump_json=False):
+        """Core cross-domain eval. Caller is responsible for cfg gating and main-process check."""
+        cd_cfg = self.cfg.yaml_cfg.get('cross_domain_eval') if hasattr(self.cfg, 'yaml_cfg') else None
+        if not cd_cfg:
+            return None
+
         cd_yaml = cd_cfg.get('config')
         if not cd_yaml:
             print('[CrossDomain] cross_domain_eval.config not set, skipping')
-            return
+            return None
 
         from pathlib import Path
         cd_path = Path(cd_yaml)
@@ -263,34 +318,36 @@ class DetSolver(BaseSolver):
             cd_path = (Path(__file__).resolve().parents[2] / cd_path).resolve()
         if not cd_path.is_file():
             print(f'[CrossDomain] config not found: {cd_path}, skipping')
-            return
+            return None
 
         from ..core import YAMLConfig
         cd = YAMLConfig(str(cd_path))
         cd_loader = dist_utils.warp_loader(cd.val_dataloader, shuffle=cd.val_dataloader.shuffle)
         cd_evaluator = cd.evaluator
 
-        module = self.ema.module if self.ema else self.model
-        print(f'[CrossDomain] running eval with config={cd_path.name}, '
+        tag = f'epoch={epoch}' if epoch is not None else 'final'
+        print(f'[CrossDomain][{tag}] running eval with config={cd_path.name}, '
               f'val_anns={cd.yaml_cfg["val_dataloader"]["dataset"]["ann_file"]}')
         cd_stats, cd_coco_evaluator = evaluate(
             module, self.criterion, self.postprocessor,
             cd_loader, cd_evaluator, self.device,
         )
 
-        weather_line = _format_weather_summary(cd_stats, prefix='Weather/CrossDomain')
+        weather_line = _format_weather_summary(cd_stats, prefix=f'Weather/CrossDomain[{tag}]')
         if weather_line:
             print(weather_line)
         if 'coco_eval_bbox' in cd_stats:
             v = cd_stats['coco_eval_bbox']
-            print(f'[CrossDomain] Overall mAP50={v[_COCO_MAP_50_IDX]:.4f} '
+            print(f'[CrossDomain][{tag}] Overall mAP50={v[_COCO_MAP_50_IDX]:.4f} '
                   f'mAP95={v[_COCO_MAP_5095_IDX]:.4f}')
 
-        if self.output_dir:
+        if dump_json and self.output_dir:
             dump_path = self.output_dir / 'cross_domain_eval.json'
             with dump_path.open('w') as f:
                 json.dump(cd_stats, f, indent=2)
             print(f'[CrossDomain] saved {dump_path}')
+
+        return cd_stats
 
     def val(self, ):
         self.eval()

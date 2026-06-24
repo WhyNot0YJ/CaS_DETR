@@ -66,3 +66,9 @@ train_dataloader:
 vis_after_train: True
 vis_num_images: 8
 vis_score_thr: 0.35
+
+weather_subset_eval:
+  every_n_epochs: 10
+
+weather_subset_eval:
+  every_n_epochs: 10

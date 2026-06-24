@@ -34,6 +34,7 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 from common.det_eval_metrics import (
     coco_ap_at_iou50_all,
     coco_area_ap_at_iou50,
+    compute_weather_subset_metrics,
     extract_per_category_ap_from_coco_eval,
     run_coco_bbox_eval,
     write_eval_csv,
@@ -329,8 +330,13 @@ def compute_cas_metrics(
     ann_file: str,
     predictions: List[Dict],
     dataset_name: str,
-) -> Tuple[Dict[str, Any], List[str]]:
-    """Full CaS_DETR-compatible metrics from GT + predictions."""
+) -> Tuple[Dict[str, Any], List[str], List[str]]:
+    """Full CaS_DETR-compatible metrics from GT + predictions.
+
+    Returns ``(metrics, class_names, weather_buckets)``. ``weather_buckets`` is the
+    sorted list of weather subset names found in ``images[].weather`` (empty if none).
+    Per-bucket entries land in ``metrics`` as ``weather_<bucket>_mAP_50/5095``.
+    """
     coco_gt = _build_coco_gt_dict(ann_file)
     categories = sorted(coco_gt.get("categories", []), key=lambda c: c["id"])
     class_names = [str(c["name"]) for c in categories]
@@ -342,7 +348,7 @@ def compute_cas_metrics(
             "AP_small", "AP_medium", "AP_large",
             "AP_small_50", "AP_medium_50", "AP_large_50",
         ]}
-        return empty, class_names
+        return empty, class_names, []
 
     stats = ce.stats
     s50, m50, l50 = coco_area_ap_at_iou50(ce)
@@ -365,7 +371,15 @@ def compute_cas_metrics(
     for name, v in per5095.items():
         metrics[f"AP5095_{name}"] = v
 
-    return metrics, class_names
+    weather_metrics = compute_weather_subset_metrics(coco_gt, predictions)
+    metrics.update(weather_metrics)
+    weather_buckets = sorted({
+        k[len("weather_"):-len("_mAP_50")]
+        for k in weather_metrics
+        if k.endswith("_mAP_50")
+    })
+
+    return metrics, class_names, weather_buckets
 
 
 def _config_stub_for_benchmark(yaml_cfg: Dict[str, Any], config_path: str) -> Dict[str, Any]:
@@ -379,6 +393,133 @@ def _config_stub_for_benchmark(yaml_cfg: Dict[str, Any], config_path: str) -> Di
         "model": {},
         "_config_path": config_path,
     }
+
+
+def _resolve_cd_config_path(cd_yaml: str) -> Optional[Path]:
+    """Resolve cross_domain_eval.config which is normally relative to a framework dir
+    (e.g. DQM-DETR/), but eval_deim_dfine.py chdirs into that dir before calling here,
+    so the relative path is already valid from cwd. Falls back to absolute and to
+    the framework dir explicitly if needed."""
+    p = Path(cd_yaml)
+    if p.is_absolute() and p.is_file():
+        return p
+    cand = Path.cwd() / p
+    if cand.is_file():
+        return cand
+    return None
+
+
+def _apply_cross_domain_remap_to_dict(coco_gt_dict: Dict[str, Any], label_map: Dict[int, int],
+                                      drop_unmapped: bool, override_categories: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Mirror of ``CocoEvaluatorTrainLabelMapping._apply_cross_domain_remap`` but on a plain dict.
+
+    Rewrites GT category_id from val-domain to train-domain ids and replaces categories
+    with ``override_categories`` (so prediction label index 0..N-1 maps to the train head)."""
+    out = deepcopy(coco_gt_dict)
+    kept = []
+    for ann in out.get("annotations", []):
+        src = int(ann["category_id"])
+        if src in label_map:
+            ann["category_id"] = label_map[src]
+            kept.append(ann)
+        elif not drop_unmapped:
+            kept.append(ann)
+    out["annotations"] = kept
+    out["categories"] = [dict(c) for c in override_categories]
+    return out
+
+
+def _maybe_run_cross_domain_csv_row(
+    *,
+    cfg,
+    model,
+    postprocessor,
+    device,
+    csv_path: Path,
+    model_name: str,
+    dataset_name: str,
+    bench_dict: Optional[Dict[str, Any]],
+    append_csv: bool,
+) -> bool:
+    """If ``cross_domain_eval`` is configured, run inference on its val set and append a CSV row.
+
+    Returns True iff a row was written.
+    """
+    yaml_cfg = getattr(cfg, "yaml_cfg", {}) or {}
+    cd_cfg = yaml_cfg.get("cross_domain_eval")
+    if not cd_cfg or not cd_cfg.get("enable", True):
+        return False
+
+    cd_yaml_rel = cd_cfg.get("config")
+    if not cd_yaml_rel:
+        LOG.info("[CrossDomain/CSV] cross_domain_eval.config not set, skipping")
+        return False
+    cd_yaml = _resolve_cd_config_path(cd_yaml_rel)
+    if cd_yaml is None:
+        LOG.warning("[CrossDomain/CSV] cross-domain config not found: %s", cd_yaml_rel)
+        return False
+
+    # cfg's YAMLConfig was already imported into the framework subpackage (DQM-DETR / DEIM / etc.)
+    # via _setup_deim/_setup_dfine. Reuse the same module to keep registry parity.
+    from engine.core import YAMLConfig as _YAMLConfig  # type: ignore[import-not-found]
+    cd = _YAMLConfig(str(cd_yaml))
+
+    cd_loader = cd.val_dataloader
+    cd_ds = cd.yaml_cfg.get("val_dataloader", {}).get("dataset", {}) or {}
+    ann_file = cd_ds.get("ann_file", "")
+    if not ann_file or not Path(ann_file).is_file():
+        LOG.warning("[CrossDomain/CSV] DAWN ann_file missing: %s", ann_file)
+        return False
+
+    eval_cfg = cd.yaml_cfg.get("evaluator", {}) or {}
+    label_map_raw = eval_cfg.get("cross_domain_label_map") or {}
+    label_map = {int(k): int(v) for k, v in label_map_raw.items()}
+    drop_unmapped = bool(eval_cfg.get("drop_unmapped_gt", False))
+    override_categories = eval_cfg.get("override_categories") or []
+
+    LOG.info("[CrossDomain/CSV] running DAWN cross-domain eval | ann=%s | label_map=%s",
+             ann_file, label_map)
+    preds = collect_predictions(
+        model,
+        postprocessor,
+        cd_loader,
+        device,
+        remap_mscoco_category=False,
+        label2category=None,
+    )
+    LOG.info("[CrossDomain/CSV] collected %d predictions", len(preds))
+
+    coco_gt = _build_coco_gt_dict(ann_file)
+    if label_map and override_categories:
+        coco_gt = _apply_cross_domain_remap_to_dict(coco_gt, label_map, drop_unmapped, override_categories)
+
+    # Write a temp ann file for compute_cas_metrics (it re-reads JSON). Keep the function
+    # API stable by serializing the remapped GT to a sibling temp path.
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix="_cd_remapped.json", delete=False, encoding="utf-8") as fh:
+        json.dump(coco_gt, fh)
+        tmp_ann = fh.name
+    try:
+        metrics, class_names, weather_buckets = compute_cas_metrics(tmp_ann, preds, dataset_name)
+    finally:
+        try:
+            os.remove(tmp_ann)
+        except OSError:
+            pass
+
+    log_detr_eval_summary(LOG, "cross_domain_dawn", metrics, bench_dict)
+    write_eval_csv(
+        csv_path,
+        model=model_name,
+        dataset=dataset_name,
+        eval_split="cross_domain_dawn",
+        metrics=metrics,
+        class_names=class_names,
+        append=append_csv,
+        benchmark=bench_dict,
+        weather_buckets=weather_buckets or None,
+    )
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +699,7 @@ def main():
         )
         LOG.info("Collected %d predictions for %s", len(preds), split_name)
         LOG.info("Computing CaS-compatible metrics from %s ...", ann_file)
-        metrics, class_names = compute_cas_metrics(ann_file, preds, dataset_name)
+        metrics, class_names, weather_buckets = compute_cas_metrics(ann_file, preds, dataset_name)
         log_detr_eval_summary(LOG, split_name, metrics, bench_dict)
 
         write_eval_csv(
@@ -570,6 +711,7 @@ def main():
             class_names=class_names,
             append=append_csv,
             benchmark=bench_dict,
+            weather_buckets=weather_buckets or None,
         )
         append_csv = True
         wrote_any = True
@@ -578,6 +720,20 @@ def main():
         LOG.info("Wrote %s", csv_path)
     else:
         LOG.warning("No eval split was written to CSV.")
+
+    cd_wrote = _maybe_run_cross_domain_csv_row(
+        cfg=cfg,
+        model=model,
+        postprocessor=solver.postprocessor,
+        device=device,
+        csv_path=csv_path,
+        model_name=model_name,
+        dataset_name=dataset_name,
+        bench_dict=bench_dict,
+        append_csv=append_csv or wrote_any,
+    )
+    if cd_wrote:
+        wrote_any = True
 
     if restore_pruning.get("found"):
         _set_prune_in_eval(model, enabled=bool(restore_pruning.get("prev")))

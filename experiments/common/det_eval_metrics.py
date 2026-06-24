@@ -159,6 +159,54 @@ def run_coco_bbox_eval(
         return None
 
 
+def compute_weather_subset_metrics(
+    coco_gt_dict: Dict[str, Any],
+    predictions: List[Dict[str, Any]],
+) -> Dict[str, float]:
+    """
+    Per-weather-bucket mAP@0.5 / mAP@0.5:0.95 from a COCO GT dict (with ``images[].weather``).
+
+    Bucket key normalization matches ``det_engine._build_weather_evaluators``:
+    ``str(weather).lower().replace(' ', '_')``. Returns ``{}`` if no images carry a weather field.
+    Output keys: ``weather_<bucket>_mAP_50`` and ``weather_<bucket>_mAP_5095``.
+    """
+    if COCO is None or COCOeval is None:
+        return {}
+    images = coco_gt_dict.get("images", []) or []
+    weather_to_img_ids: Dict[str, set] = {}
+    for image in images:
+        w = image.get("weather")
+        if not w:
+            continue
+        bucket = str(w).lower().replace(" ", "_")
+        weather_to_img_ids.setdefault(bucket, set()).add(int(image["id"]))
+    if not weather_to_img_ids:
+        return {}
+
+    out: Dict[str, float] = {}
+    for bucket in sorted(weather_to_img_ids.keys()):
+        img_ids = weather_to_img_ids[bucket]
+        sub_gt = dict(coco_gt_dict)
+        sub_gt["images"] = [im for im in images if int(im["id"]) in img_ids]
+        sub_gt["annotations"] = [
+            a for a in coco_gt_dict.get("annotations", [])
+            if int(a.get("image_id", -1)) in img_ids
+        ]
+        sub_preds = [p for p in predictions if int(p.get("image_id", -1)) in img_ids]
+        if not sub_gt["annotations"]:
+            out[f"weather_{bucket}_mAP_50"] = 0.0
+            out[f"weather_{bucket}_mAP_5095"] = 0.0
+            continue
+        ce = run_coco_bbox_eval(sub_gt, sub_preds)
+        if ce is None or not hasattr(ce, "stats") or len(ce.stats) < 2:
+            out[f"weather_{bucket}_mAP_50"] = 0.0
+            out[f"weather_{bucket}_mAP_5095"] = 0.0
+            continue
+        out[f"weather_{bucket}_mAP_50"] = max(0.0, float(ce.stats[1]))
+        out[f"weather_{bucket}_mAP_5095"] = max(0.0, float(ce.stats[0]))
+    return out
+
+
 def coco_area_bucket_name(area: float) -> str:
     """按 COCO 面积阈值返回 ``small`` / ``medium`` / ``large``。"""
     area = float(area)
@@ -235,12 +283,17 @@ def write_eval_csv(
     class_names: Optional[List[str]] = None,
     append: bool = False,
     benchmark: Optional[Dict[str, float]] = None,
+    weather_buckets: Optional[List[str]] = None,
 ) -> None:
     """
     将一行评估指标写入 CSV。
 
     ``class_names`` 非空时，额外写入 ``AP50_<cls>``（每类 AP@0.5）与 ``AP5095_<cls>``（每类 AP@0.5:0.95）列；
     对应键名必须为 ``AP50_<cls>``、``AP5095_<cls>``（不再使用 ``mAP_<cls>`` 表示每类指标）。
+
+    ``weather_buckets`` 非空时，额外写入 ``weather_<bucket>_mAP_50``、``weather_<bucket>_mAP_5095`` 列。
+    桶名用小写并把空格替换成下划线，与 ``det_engine._build_weather_evaluators`` 一致。
+    缺失的桶在 metrics 中读不到时写 0，避免列宽不齐。
 
     ``benchmark`` 非空时写入 GFLOPs / Params_M / FPS / Latency_ms 列
     （由 ``common.model_benchmark.benchmark_to_dict`` 生成）。
@@ -261,6 +314,10 @@ def write_eval_csv(
         for name in class_names:
             fieldnames.append(f"AP50_{name}")
             fieldnames.append(f"AP5095_{name}")
+    if weather_buckets:
+        for bucket in weather_buckets:
+            fieldnames.append(f"weather_{bucket}_mAP_50")
+            fieldnames.append(f"weather_{bucket}_mAP_5095")
     fieldnames.extend(BENCHMARK_CSV_FIELDS)
 
     row: Dict[str, str] = {
@@ -278,6 +335,13 @@ def write_eval_csv(
             v5095 = metrics.get(f"AP5095_{name}", 0.0)
             row[f"AP50_{name}"] = f"{float(v50):.6f}" if isinstance(v50, (int, float)) else str(v50)
             row[f"AP5095_{name}"] = f"{float(v5095):.6f}" if isinstance(v5095, (int, float)) else str(v5095)
+
+    if weather_buckets:
+        for bucket in weather_buckets:
+            v50 = metrics.get(f"weather_{bucket}_mAP_50", 0.0)
+            v5095 = metrics.get(f"weather_{bucket}_mAP_5095", 0.0)
+            row[f"weather_{bucket}_mAP_50"] = f"{float(v50):.6f}" if isinstance(v50, (int, float)) else str(v50)
+            row[f"weather_{bucket}_mAP_5095"] = f"{float(v5095):.6f}" if isinstance(v5095, (int, float)) else str(v5095)
 
     if benchmark:
         for bk in BENCHMARK_CSV_FIELDS:

@@ -162,11 +162,15 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
 
 
 @torch.no_grad()
-def evaluate(model: torch.nn.Module, criterion: torch.nn.Module, postprocessor, data_loader, coco_evaluator: CocoEvaluator, device):
+def evaluate(model: torch.nn.Module, criterion: torch.nn.Module, postprocessor, data_loader, coco_evaluator: CocoEvaluator, device, compute_weather_subsets: bool = True):
     model.eval()
     criterion.eval()
     coco_evaluator.cleanup()
-    weather_evaluators = _build_weather_evaluators(coco_evaluator) if coco_evaluator is not None else {}
+    weather_evaluators = (
+        _build_weather_evaluators(coco_evaluator)
+        if coco_evaluator is not None and compute_weather_subsets
+        else {}
+    )
 
     metric_logger = MetricLogger(delimiter="  ")
     # metric_logger.add_meter('class_error', SmoothedValue(window_size=1, fmt='{value:.2f}'))
