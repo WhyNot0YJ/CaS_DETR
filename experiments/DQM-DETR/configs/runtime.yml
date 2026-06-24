@@ -7,7 +7,7 @@ sync_bn: True
 find_unused_parameters: False
 
 
-use_amp: False
+use_amp: True
 scaler:
   type: GradScaler
   enabled: True
