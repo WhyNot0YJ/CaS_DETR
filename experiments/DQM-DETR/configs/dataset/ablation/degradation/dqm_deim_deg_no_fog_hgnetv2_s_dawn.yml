@@ -1,9 +1,0 @@
-__include__: [
-  './dqm_deim_full_default_hgnetv2_s_dawn.yml',
-]
-
-output_dir: ./outputs/ablation/dqm_deim_deg_no_fog_hgnetv2_s_dawn
-
-train_dataloader:
-  collate_fn:
-    fog_alpha_range: [0.0, 0.0]

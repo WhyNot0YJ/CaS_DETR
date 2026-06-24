@@ -38,6 +38,27 @@ from .det_engine import train_one_epoch, evaluate
 from ..optim.lr_scheduler import FlatCosineLRScheduler
 
 
+# COCO bbox stats vector layout (faster_coco_eval): [0]=mAP@[.5:.95], [1]=mAP@.5, [2]=mAP@.75, ...
+_COCO_MAP_5095_IDX = 0
+_COCO_MAP_50_IDX = 1
+
+
+def _format_weather_summary(test_stats: dict, prefix: str = "Weather") -> str | None:
+    """One-line summary of per-weather mAP50/mAP95, or None if no weather subsets present."""
+    keys = sorted(
+        k for k in test_stats
+        if k.startswith('weather_') and k.endswith('_coco_eval_bbox')
+    )
+    if not keys:
+        return None
+    parts = []
+    for k in keys:
+        name = k[len('weather_'):-len('_coco_eval_bbox')]
+        v = test_stats[k]
+        parts.append(f"{name}: mAP50={v[_COCO_MAP_50_IDX]:.4f} mAP95={v[_COCO_MAP_5095_IDX]:.4f}")
+    return f"[{prefix}] " + " | ".join(parts)
+
+
 class DetSolver(BaseSolver):
 
     def fit(self, ):
@@ -135,6 +156,10 @@ class DetSolver(BaseSolver):
                 self.device
             )
 
+            weather_line = _format_weather_summary(test_stats)
+            if weather_line and dist_utils.is_main_process():
+                print(weather_line)
+
             # TODO
             for k in test_stats:
                 if self.writer and dist_utils.is_main_process():
@@ -205,6 +230,8 @@ class DetSolver(BaseSolver):
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Training time {}'.format(total_time_str))
 
+        self._maybe_run_cross_domain_eval()
+
         if _maybe_run_train_end_vis is not None:
             _maybe_run_train_end_vis(
                 dist_utils.is_main_process(),
@@ -216,12 +243,65 @@ class DetSolver(BaseSolver):
                 _cfg_dict_for_vis(self.cfg),
             )
 
+    def _maybe_run_cross_domain_eval(self):
+        """If `cross_domain_eval: {config: ..., enable: true}` is set in cfg, run evaluate
+        once on a different val_dataloader/evaluator and dump stats. No-op otherwise."""
+        cd_cfg = self.cfg.yaml_cfg.get('cross_domain_eval') if hasattr(self.cfg, 'yaml_cfg') else None
+        if not cd_cfg or not cd_cfg.get('enable', True):
+            return
+        if not dist_utils.is_main_process():
+            return
+
+        cd_yaml = cd_cfg.get('config')
+        if not cd_yaml:
+            print('[CrossDomain] cross_domain_eval.config not set, skipping')
+            return
+
+        from pathlib import Path
+        cd_path = Path(cd_yaml)
+        if not cd_path.is_absolute():
+            cd_path = (Path(__file__).resolve().parents[2] / cd_path).resolve()
+        if not cd_path.is_file():
+            print(f'[CrossDomain] config not found: {cd_path}, skipping')
+            return
+
+        from ..core import YAMLConfig
+        cd = YAMLConfig(str(cd_path))
+        cd_loader = dist_utils.warp_loader(cd.val_dataloader, shuffle=cd.val_dataloader.shuffle)
+        cd_evaluator = cd.evaluator
+
+        module = self.ema.module if self.ema else self.model
+        print(f'[CrossDomain] running eval with config={cd_path.name}, '
+              f'val_anns={cd.yaml_cfg["val_dataloader"]["dataset"]["ann_file"]}')
+        cd_stats, cd_coco_evaluator = evaluate(
+            module, self.criterion, self.postprocessor,
+            cd_loader, cd_evaluator, self.device,
+        )
+
+        weather_line = _format_weather_summary(cd_stats, prefix='Weather/CrossDomain')
+        if weather_line:
+            print(weather_line)
+        if 'coco_eval_bbox' in cd_stats:
+            v = cd_stats['coco_eval_bbox']
+            print(f'[CrossDomain] Overall mAP50={v[_COCO_MAP_50_IDX]:.4f} '
+                  f'mAP95={v[_COCO_MAP_5095_IDX]:.4f}')
+
+        if self.output_dir:
+            dump_path = self.output_dir / 'cross_domain_eval.json'
+            with dump_path.open('w') as f:
+                json.dump(cd_stats, f, indent=2)
+            print(f'[CrossDomain] saved {dump_path}')
+
     def val(self, ):
         self.eval()
 
         module = self.ema.module if self.ema else self.model
         test_stats, coco_evaluator = evaluate(module, self.criterion, self.postprocessor,
                 self.val_dataloader, self.evaluator, self.device)
+
+        weather_line = _format_weather_summary(test_stats)
+        if weather_line and dist_utils.is_main_process():
+            print(weather_line)
 
         if self.output_dir:
             dist_utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, self.output_dir / "eval.pth")

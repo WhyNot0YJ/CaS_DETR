@@ -324,45 +324,36 @@ declare -A CaS_DETR_CONFIGS=(
 
 declare -A DQM_MODULE_ABLATION_CONFIGS=(
     ["dqmdeim-all-off-dairv2x"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_all_off_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-all-off-dawn"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_all_off_hgnetv2_s_dawn.yml"
     ["dqmdeim-all-off-uadetrac"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_all_off_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-degradation-only-dairv2x"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_degradation_only_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-degradation-only-dawn"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_degradation_only_hgnetv2_s_dawn.yml"
     ["dqmdeim-degradation-only-uadetrac"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_degradation_only_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-wo-dqm-dairv2x"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_dqm_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-wo-dqm-dawn"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_dqm_hgnetv2_s_dawn.yml"
     ["dqmdeim-wo-dqm-uadetrac"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_dqm_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-wo-qmqc-dairv2x"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_qmqc_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-wo-qmqc-dawn"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_qmqc_hgnetv2_s_dawn.yml"
     ["dqmdeim-wo-qmqc-uadetrac"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_qmqc_hgnetv2_s_uadetrac.yml"
 )
 
 declare -A DQM_DEGRADATION_CONFIGS=(
     ["dqmdeim-full-default-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_full_default_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-full-default-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_full_default_hgnetv2_s_dawn.yml"
     ["dqmdeim-full-default-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_full_default_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-deg-mild-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_mild_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-deg-mild-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_mild_hgnetv2_s_dawn.yml"
     ["dqmdeim-deg-mild-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_mild_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-deg-strong-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_strong_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-deg-strong-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_strong_hgnetv2_s_dawn.yml"
     ["dqmdeim-deg-strong-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_strong_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-deg-no-fog-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_fog_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-deg-no-fog-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_fog_hgnetv2_s_dawn.yml"
     ["dqmdeim-deg-no-fog-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_fog_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-deg-no-noise-blur-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_noise_blur_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-deg-no-noise-blur-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_noise_blur_hgnetv2_s_dawn.yml"
     ["dqmdeim-deg-no-noise-blur-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_noise_blur_hgnetv2_s_uadetrac.yml"
 )
 
 declare -A DQM_MAIN_CONFIGS=(
-    ["dqmdeim-full-dqm05-dawn"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-dqm05-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_dairv2x.yml"
     ["dqmdeim-full-dqm05-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_uadetrac.yml"
-    ["dqmdeim-full-dqm15-dawn"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm15_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-dqm15-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm15_hgnetv2_s_dairv2x.yml"
     ["dqmdeim-full-dqm15-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm15_hgnetv2_s_uadetrac.yml"
-    ["dqmdeim-full-qmqc025-dawn"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc025_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-qmqc025-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc025_hgnetv2_s_dairv2x.yml"
     ["dqmdeim-full-qmqc025-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc025_hgnetv2_s_uadetrac.yml"
-    ["dqmdeim-full-qmqc100-dawn"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc100_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-qmqc100-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc100_hgnetv2_s_dairv2x.yml"
     ["dqmdeim-full-qmqc100-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc100_hgnetv2_s_uadetrac.yml"
 )
 
@@ -1541,6 +1532,7 @@ generate_report() {
     echo -e "${BLUE}提示: 实验结果（包括mAP等指标）已保存在各训练脚本生成的日志目录中${NC}"
     echo -e "${BLUE}      - CaS-DETR 消融日志: CaS-DETR/outputs/ablation/${NC}"
     echo -e "${BLUE}      - DQM-DETR 消融日志: DQM-DETR/outputs/ablation/${NC}"
+    echo -e "${BLUE}      - DQM-DETR 主实验日志: DQM-DETR/outputs/main/${NC}"
     echo -e "${BLUE}      - YOLO统一日志: yolo/logs/${NC}"
     echo -e "${BLUE}      - DEIM日志: DEIM/outputs/${NC}"
     echo -e "${BLUE}      - D-FINE日志: D-FINE/output/${NC}"

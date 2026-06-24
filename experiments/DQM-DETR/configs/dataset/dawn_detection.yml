@@ -1,28 +1,31 @@
 task: detection
 
+# DAWN cross-domain eval only.
+# Remap DAWN GT (7 classes) into DAIR-V2X train head id space (8 classes), so DAIR-trained
+# predictions (label 0..7) and remapped GT score against the same category schema.
+# DAWN -> DAIR id map: car=1, truck=2, person=3 -> Pedestrian=5, bus=4,
+#                      motorcycle=5 -> Motorcyclist=7, bicycle=6 -> Cyclist=6.
+# DAWN train(7) has no DAIR counterpart; drop_unmapped_gt removes those GTs.
 evaluator:
   type: CocoEvaluatorTrainLabelMapping
   iou_types: ['bbox']
-
-num_classes: 7
-remap_mscoco_category: False
-
-vis_after_train: true
-vis_num_images: 8
-vis_score_thr: 0.35
-
-train_dataloader:
-  type: DataLoader
-  dataset:
-    type: CocoDetection
-    img_folder: /root/autodl-fs/datasets/DAWN_COCO/images
-    ann_file: /root/autodl-fs/datasets/DAWN_COCO/annotations/instances_train.json
-    return_masks: False
-  shuffle: True
-  num_workers: 4
-  drop_last: True
-  collate_fn:
-    type: BatchImageCollateFunction
+  cross_domain_label_map:
+    1: 1
+    2: 2
+    3: 5
+    4: 4
+    5: 7
+    6: 6
+  drop_unmapped_gt: true
+  override_categories:
+    - {id: 1, name: Car}
+    - {id: 2, name: Truck}
+    - {id: 3, name: Van}
+    - {id: 4, name: Bus}
+    - {id: 5, name: Pedestrian}
+    - {id: 6, name: Cyclist}
+    - {id: 7, name: Motorcyclist}
+    - {id: 8, name: Trafficcone}
 
 val_dataloader:
   type: DataLoader

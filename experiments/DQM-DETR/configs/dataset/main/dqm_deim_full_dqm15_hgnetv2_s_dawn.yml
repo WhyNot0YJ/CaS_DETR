@@ -1,8 +1,0 @@
-__include__: [
-  'ablation/degradation/dqm_deim_full_default_hgnetv2_s_dawn.yml',
-]
-
-output_dir: ./outputs/ablation/dqm_deim_full_dqm15_hgnetv2_s_dawn
-
-DQMDFINETransformer:
-  dqm_strength: 1.5

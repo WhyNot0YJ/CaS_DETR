@@ -1,8 +1,8 @@
 __include__: [
-  'ablation/degradation/dqm_deim_full_default_hgnetv2_s_uadetrac.yml',
+  './dqm_deim_full_default_hgnetv2_s_uadetrac.yml',
 ]
 
-output_dir: ./outputs/ablation/dqm_deim_full_qmqc100_hgnetv2_s_uadetrac
+output_dir: ./outputs/main/dqm_deim_full_qmqc100_hgnetv2_s_uadetrac
 
 DQMDEIMCriterion:
   qmqc_weight: 1.0
