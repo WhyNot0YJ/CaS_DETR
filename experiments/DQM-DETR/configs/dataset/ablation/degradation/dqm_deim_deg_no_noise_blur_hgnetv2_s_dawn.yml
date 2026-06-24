@@ -1,0 +1,11 @@
+__include__: [
+  './dqm_deim_full_default_hgnetv2_s_dawn.yml',
+]
+
+output_dir: ./outputs/ablation/dqm_deim_deg_no_noise_blur_hgnetv2_s_dawn
+
+train_dataloader:
+  collate_fn:
+    noise_std_range: [0.0, 0.0]
+    blur_kernel: 1
+    blur_sigma_range: [0.1, 0.1]

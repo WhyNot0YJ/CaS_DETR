@@ -22,7 +22,10 @@ export OMP_NUM_THREADS=1
 #   RTDETR_TUNING_CKPT=/path/to.pth ./run_batch_experiments.sh --yes --rtdetrv2
 #   ./run_batch_experiments.sh --dairv2x --rtdetrv2          # 仅 DAIR-V2X 的 RT-DETR v2
 #   ./run_batch_experiments.sh --cas_detr                      # 只运行新的 CaS-DETR 第一阶段消融实验（仅 DAIR-V2X）
-#   ./run_batch_experiments.sh --dqm_detr                      # 只运行 DQM-DETR 鲁棒检测消融实验（仅 DAIR-V2X）
+#   ./run_batch_experiments.sh --dqm_detr                      # 只运行 DQM-DETR 全部消融+主实验（消融子组 + 主实验 × 3 数据集）
+#   ./run_batch_experiments.sh --dqm_module_ablation           # 只运行 DQM 模块消融（all_off / wo_dqm / wo_qmqc / degradation_only）
+#   ./run_batch_experiments.sh --dqm_degradation               # 只运行 DQM 退化消融（full_default / mild / strong / no_fog / no_noise_blur）
+#   ./run_batch_experiments.sh --dqm_main                      # 只运行 DQM 主实验（dqm05 / dqm15 / qmqc025 / qmqc100）
 #   ./run_batch_experiments.sh --cas_caip                      # 只运行 CAIP 消融（4 个配置）
 #   ./run_batch_experiments.sh --cas_caip_base05               # 只运行 CAIP 消融：r_base=0.5, alpha=1.0（4 个配置，DAIR+UA）
 #   ./run_batch_experiments.sh --cas_pack_moe4_base03_a10      # 打包：moe4 base03_a10 双数据集 + moe4_only + cass_only_caip base03_a10（不含 keep*_fixed）
@@ -43,7 +46,10 @@ export OMP_NUM_THREADS=1
 #   ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2，等价 --rtdetrv2
 #   ./run_batch_experiments.sh --test --rtdetrv2               # 测试模式只跑官方 RT-DETRv2（2 epoch + cas-eval）
 #   ./run_batch_experiments.sh --test --cas_detr               # 测试模式只运行 CaS-DETR（DAIR-V2X 消融）
-#   ./run_batch_experiments.sh --test --dqm_detr               # 测试模式只运行 DQM-DETR（DAIR-V2X 消融）
+#   ./run_batch_experiments.sh --test --dqm_detr               # 测试模式只运行 DQM-DETR 全部消融+主实验（2 epoch）
+#   ./run_batch_experiments.sh --test --dqm_module_ablation    # 测试模式只运行 DQM 模块消融
+#   ./run_batch_experiments.sh --test --dqm_degradation        # 测试模式只运行 DQM 退化消融
+#   ./run_batch_experiments.sh --test --dqm_main               # 测试模式只运行 DQM 主实验
 #   ./run_batch_experiments.sh --test --yolov5                 # 测试模式只运行YOLOv5
 #   ./run_batch_experiments.sh --test --yolov8                 # 测试模式只运行YOLOv8
 #   ./run_batch_experiments.sh --test --yolov12                # 测试模式只运行YOLOv12
@@ -56,7 +62,7 @@ export OMP_NUM_THREADS=1
 #   ./run_batch_experiments.sh --m                             # 只运行所有 m 规模 YOLO / YOLOX
 #   ./run_batch_experiments.sh --custom cfg1.yaml cfg2.yaml    # 自定义配置列表
 #   ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x casdeim-moe-only-dairv2x   # 使用内置键名选择
-#   ./run_batch_experiments.sh --dairv2x                       # 只保留 DAIR-V2X 维度（可叠 --rtdetrv2 / --cas_detr / --dqm_detr 等）
+#   ./run_batch_experiments.sh --dairv2x                       # 只保留 DAIR-V2X 维度（可叠 --rtdetrv2 / --cas_detr 等）
 #   ./run_batch_experiments.sh --uadetrac                     # 只保留 UA-DETRAC 维度
 #   ./run_batch_experiments.sh --dataset dairv2x --rtdetrv2    # 同上：--dataset 与 --dairv2x 等价；可与 --rtdetrv2 任意顺序组合
 #   ./run_batch_experiments.sh --rtdetrv2 --dataset dairv2x     # 同上
@@ -68,7 +74,7 @@ export OMP_NUM_THREADS=1
 # CaS_DETR / RT-DETR / MOE：输入为 letterbox 到 target_size（见各 YAML 中 augmentation.resize.letterbox_fill，一般 114）。
 # 一键非交互（跳过确认）示例：
 #   ./run_batch_experiments.sh --yes --cas_detr
-#   ./run_batch_experiments.sh --yes --test --rtdetrv2 --cas_detr --dqm_detr
+#   ./run_batch_experiments.sh --yes --test --rtdetrv2 --cas_detr --dqm_detr --dqm_module_ablation
 ################################################################################
 
 set -e  # 遇到错误时不退出（我们会手动处理）
@@ -311,21 +317,60 @@ declare -A CaS_DETR_CONFIGS=(
     ["casdeim-cass-only-caip-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_hgnetv2_s_dairv2x.yml"
 )
 
-declare -A DQM_DETR_CONFIGS=(
-    ["dqmdeim-all-off-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_all_off_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-degradation-only-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_degradation_only_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-wo-dqm-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_wo_dqm_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-wo-qmqc-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_wo_qmqc_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-full-default-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_full_default_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-full-qmqc025-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_full_qmqc025_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-full-qmqc100-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_full_qmqc100_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-full-dqm05-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_full_dqm05_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-full-dqm15-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_full_dqm15_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-deg-mild-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_deg_mild_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-deg-strong-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_deg_strong_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-deg-no-fog-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_deg_no_fog_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-deg-no-noise-blur-dairv2x"]="DQM-DETR/configs/dataset/ablation/dqm_deim_deg_no_noise_blur_hgnetv2_s_dairv2x.yml"
+# ── DQM-DETR 配置：消融实验（ablation 下） + 主实验（与 ablation 同级） ──
+#   模块消融 (module_ablation)：关闭单个模块观察精度变化
+#   退化消融 (degradation)：不同退化强度 / 退化类别的影响
+#   主实验 (main)：DQM/QMQC 关键超参数扫描
+
+declare -A DQM_MODULE_ABLATION_CONFIGS=(
+    ["dqmdeim-all-off-dairv2x"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_all_off_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-all-off-dawn"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_all_off_hgnetv2_s_dawn.yml"
+    ["dqmdeim-all-off-uadetrac"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_all_off_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-degradation-only-dairv2x"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_degradation_only_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-degradation-only-dawn"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_degradation_only_hgnetv2_s_dawn.yml"
+    ["dqmdeim-degradation-only-uadetrac"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_degradation_only_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-wo-dqm-dairv2x"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_dqm_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-wo-dqm-dawn"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_dqm_hgnetv2_s_dawn.yml"
+    ["dqmdeim-wo-dqm-uadetrac"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_dqm_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-wo-qmqc-dairv2x"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_qmqc_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-wo-qmqc-dawn"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_qmqc_hgnetv2_s_dawn.yml"
+    ["dqmdeim-wo-qmqc-uadetrac"]="DQM-DETR/configs/dataset/ablation/module_ablation/dqm_deim_wo_qmqc_hgnetv2_s_uadetrac.yml"
 )
+
+declare -A DQM_DEGRADATION_CONFIGS=(
+    ["dqmdeim-full-default-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_full_default_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-full-default-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_full_default_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-default-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_full_default_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-deg-mild-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_mild_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-deg-mild-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_mild_hgnetv2_s_dawn.yml"
+    ["dqmdeim-deg-mild-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_mild_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-deg-strong-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_strong_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-deg-strong-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_strong_hgnetv2_s_dawn.yml"
+    ["dqmdeim-deg-strong-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_strong_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-deg-no-fog-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_fog_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-deg-no-fog-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_fog_hgnetv2_s_dawn.yml"
+    ["dqmdeim-deg-no-fog-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_fog_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-deg-no-noise-blur-dairv2x"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_noise_blur_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-deg-no-noise-blur-dawn"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_noise_blur_hgnetv2_s_dawn.yml"
+    ["dqmdeim-deg-no-noise-blur-uadetrac"]="DQM-DETR/configs/dataset/ablation/degradation/dqm_deim_deg_no_noise_blur_hgnetv2_s_uadetrac.yml"
+)
+
+declare -A DQM_MAIN_CONFIGS=(
+    ["dqmdeim-full-dqm05-dawn"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-dqm05-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-full-dqm15-dawn"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm15_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-dqm15-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm15_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-full-qmqc025-dawn"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc025_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-qmqc025-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc025_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-full-qmqc100-dawn"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc100_hgnetv2_s_dawn.yml"
+    ["dqmdeim-full-qmqc100-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc100_hgnetv2_s_uadetrac.yml"
+)
+
+# 兼容旧版：DQM_DETR_CONFIGS 合并消融子组 + 主实验（--dqm_detr 一键运行全部）
+declare -A DQM_DETR_CONFIGS=()
+for _key in "${!DQM_MODULE_ABLATION_CONFIGS[@]}"; do DQM_DETR_CONFIGS[$_key]="${DQM_MODULE_ABLATION_CONFIGS[$_key]}"; done
+for _key in "${!DQM_DEGRADATION_CONFIGS[@]}"; do DQM_DETR_CONFIGS[$_key]="${DQM_DEGRADATION_CONFIGS[$_key]}"; done
+for _key in "${!DQM_MAIN_CONFIGS[@]}"; do DQM_DETR_CONFIGS[$_key]="${DQM_MAIN_CONFIGS[$_key]}"; done
 
 declare -A YOLOV5_CONFIGS=(
     ["yolov5n-dairv2x"]="yolo/configs/yolov5n_dairv2x.yaml"
@@ -659,7 +704,7 @@ parse_arguments() {
     done
 
     if [ "$SCOPE_DAIRV2X" = true ] || [ "$SCOPE_UADETRAC" = true ]; then
-        log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），可与 --rt-detr、--cas_detr、--dqm_detr 等任意顺序组合"
+log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），可与 --rt-detr、--cas_detr、--dqm_detr、--dqm_module_ablation、--dqm_degradation、--dqm_main 等任意顺序组合"
     fi
     if [ "$has_n" = true ] || [ "$has_s" = true ] || [ "$has_m" = true ]; then
         log_info "模型规模作用域已启用（--n / --s / --m）；推荐与 --yolo 或 --yolov5/--yolov8/--yolov12/--yolox 组合"
@@ -756,6 +801,9 @@ parse_arguments() {
     local has_rtdetrv2=false
     local has_cas_detr=false
     local has_dqm_detr=false
+    local has_dqm_module_ablation=false
+    local has_dqm_degradation=false
+    local has_dqm_main=false
     local has_cas_caip=false
     local has_cas_caip_base05=false
     local has_cas_pack_moe4_base03_a10=false
@@ -784,6 +832,15 @@ parse_arguments() {
                 ;;
             --dqm_detr|--dqm-detr)
                 has_dqm_detr=true
+                ;;
+            --dqm_module_ablation|--dqm-module-ablation|--dqm-module)
+                has_dqm_module_ablation=true
+                ;;
+            --dqm_degradation|--dqm-degradation|--dqm-deg)
+                has_dqm_degradation=true
+                ;;
+            --dqm_main|--dqm-main)
+                has_dqm_main=true
                 ;;
             --cas_caip)
                 has_cas_caip=true
@@ -834,12 +891,15 @@ parse_arguments() {
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
         [ "$has_cas_detr" = true ] && selected_types+=("CaS_DETR")
-        [ "$has_dqm_detr" = true ] && selected_types+=("DQM_DETR")
+        [ "$has_dqm_detr" = true ] && selected_types+=("DQM_DETR(all)")
+        [ "$has_dqm_module_ablation" = true ] && selected_types+=("DQM_ModuleAblation")
+        [ "$has_dqm_degradation" = true ] && selected_types+=("DQM_Degradation")
+        [ "$has_dqm_main" = true ] && selected_types+=("DQM_Main")
         [ "$has_cas_caip" = true ] && selected_types+=("CaS_DETR_CAIP")
         [ "$has_cas_caip_base05" = true ] && selected_types+=("CaS_DETR_CAIP_rbase0.5_a1.0")
         [ "$has_cas_pack_moe4_base03_a10" = true ] && selected_types+=("CaS_DETR_PACK_moe4_base03_a10")
@@ -882,6 +942,33 @@ parse_arguments() {
         if [ "$has_dqm_detr" = true ]; then
             for key in $(printf '%s\n' "${!DQM_DETR_CONFIGS[@]}" | sort); do
                 local p="${DQM_DETR_CONFIGS[$key]}"
+                if filter_config "$p"; then
+                    CONFIGS_TO_RUN+=("$p")
+                fi
+            done
+        fi
+
+        if [ "$has_dqm_module_ablation" = true ]; then
+            for key in $(printf '%s\n' "${!DQM_MODULE_ABLATION_CONFIGS[@]}" | sort); do
+                local p="${DQM_MODULE_ABLATION_CONFIGS[$key]}"
+                if filter_config "$p"; then
+                    CONFIGS_TO_RUN+=("$p")
+                fi
+            done
+        fi
+
+        if [ "$has_dqm_degradation" = true ]; then
+            for key in $(printf '%s\n' "${!DQM_DEGRADATION_CONFIGS[@]}" | sort); do
+                local p="${DQM_DEGRADATION_CONFIGS[$key]}"
+                if filter_config "$p"; then
+                    CONFIGS_TO_RUN+=("$p")
+                fi
+            done
+        fi
+
+        if [ "$has_dqm_main" = true ]; then
+            for key in $(printf '%s\n' "${!DQM_MAIN_CONFIGS[@]}" | sort); do
+                local p="${DQM_MAIN_CONFIGS[$key]}"
                 if filter_config "$p"; then
                     CONFIGS_TO_RUN+=("$p")
                 fi
@@ -1117,7 +1204,11 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --rt-detr                       # 与 --rtdetrv2 相同，仅 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --rtdetrv2                      # 官方 rtdetrv2_pytorch + train_adapter（默认 --cas-eval）"
         echo "  ./run_batch_experiments.sh --cas_detr                      # 只运行新的 CaS-DETR 第一阶段消融（仅 DAIR-V2X）"
-        echo "  ./run_batch_experiments.sh --dqm_detr                      # 只运行 DQM-DETR 鲁棒检测消融（仅 DAIR-V2X）"
+        echo "  ./run_batch_experiments.sh --dqm_detr                      # DQM-DETR 全部消融+主实验（3 数据集 × 消融 + 主实验）"
+        echo "  ./run_batch_experiments.sh --dqm_module_ablation           # 仅 DQM 模块消融（all_off / wo_dqm / wo_qmqc / degradation_only）"
+        echo "  ./run_batch_experiments.sh --dqm_degradation               # 仅 DQM 退化消融（full_default / mild / strong / no_fog / no_noise_blur）"
+        echo "  ./run_batch_experiments.sh --dqm_main                     # 仅 DQM 主实验（dqm05/15 / qmqc025/100）"
+        echo "  ./run_batch_experiments.sh --dqm_detr --dairv2x             # DQM 全部消融+主实验仅限于 DAIR-V2X"
         echo "  ./run_batch_experiments.sh --cas_caip                      # 只运行 CAIP 消融（4 个配置）"
         echo "  ./run_batch_experiments.sh --cas_caip_base05               # 只运行 CAIP 消融：r_base=0.5, alpha=1.0（4 个配置，DAIR+UA）"
         echo "  ./run_batch_experiments.sh --cas_pack_moe4_base03_a10      # moe4 base03_a10 打包（不含 keep 固定分支）"
@@ -1136,15 +1227,19 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --deformable-detr               # 只运行Deformable-DETR"
         echo "  ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --test --cas_detr               # 测试模式只运行 CaS-DETR"
-        echo "  ./run_batch_experiments.sh --test --dqm_detr               # 测试模式只运行 DQM-DETR"
+        echo "  ./run_batch_experiments.sh --test --dqm_detr               # 测试模式：DQM 全部消融+主实验"
+        echo "  ./run_batch_experiments.sh --test --dqm_module_ablation    # 测试模式：DQM 模块消融"
+        echo "  ./run_batch_experiments.sh --test --dqm_degradation        # 测试模式：DQM 退化消融"
+        echo "  ./run_batch_experiments.sh --test --dqm_main               # 测试模式：DQM 主实验"
         echo "  ./run_batch_experiments.sh --test --yolov5                 # 测试模式只运行YOLOv5"
         echo "  ./run_batch_experiments.sh --test --yolov8                 # 测试模式只运行YOLOv8"
         echo "  ./run_batch_experiments.sh --test --yolov12                # 测试模式只运行YOLOv12"
         echo "  ./run_batch_experiments.sh --test --yolox                  # 测试模式只运行 YOLOX"
         echo "  ./run_batch_experiments.sh --test --fasterrcnn             # 测试模式只运行 Faster R-CNN"
         echo "  ./run_batch_experiments.sh --test --deformable-detr        # 测试模式只运行Deformable-DETR"
-        echo "  ./run_batch_experiments.sh --rtdetrv2 --cas_detr --dqm_detr      # 运行多个实验类型（可叠加）"
-        echo "  ./run_batch_experiments.sh --test --rtdetrv2 --cas_detr --dqm_detr # 测试模式运行多个类型"
+        echo "  ./run_batch_experiments.sh --rtdetrv2 --cas_detr --dqm_detr           # 运行多个实验类型（可叠加）"
+        echo "  ./run_batch_experiments.sh --test --rtdetrv2 --cas_detr --dqm_detr      # 测试模式运行多个类型"
+        echo "  ./run_batch_experiments.sh --dqm_module_ablation --dqm_degradation      # DQM 模块消融 + 退化消融"
         echo "  ./run_batch_experiments.sh --r18                           # 只运行R18"
         echo "  ./run_batch_experiments.sh --r18                           # 只运行R18"
         echo "  ./run_batch_experiments.sh --n                             # 只运行所有 n 规模 YOLO（v5/v8/v12）"
@@ -1162,11 +1257,11 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --select                        # 交互式选择"
         echo "  ./run_batch_experiments.sh --rerun-failed [LOG_DIR]        # 重跑失败实验"
         echo "  ./run_batch_experiments.sh --yes --cas_detr                 # 非交互一键跑 CaS-DETR"
-        echo "  ./run_batch_experiments.sh --yes --dqm_detr                 # 非交互一键跑 DQM-DETR"
+        echo "  ./run_batch_experiments.sh --yes --dqm_detr                 # 非交互一键跑 DQM-DETR 全部消融+主实验"
+        echo "  ./run_batch_experiments.sh --yes --dqm_module_ablation      # 非交互一键跑 DQM 模块消融"
         echo "  ./run_batch_experiments.sh --dairv2x --rtdetrv2             # 仅 DAIR-V2X 的 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --dataset dairv2x --rtdetr       # 同上（--dataset 写法）"
         echo "  ./run_batch_experiments.sh --dairv2x --cas_detr             # 仅 DAIR-V2X 的 CaS-DETR 第一阶段消融"
-        echo "  ./run_batch_experiments.sh --dairv2x --dqm_detr             # 仅 DAIR-V2X 的 DQM-DETR 鲁棒检测消融"
         echo "  ./run_batch_experiments.sh --yolo --s                      # 同上（推荐简写）"
         echo "  ./run_batch_experiments.sh --yolov5 --yolov8 --yolov12 --yolox --s  # 跑所有 s 规模 YOLO / YOLOX"
         exit 1
@@ -1353,8 +1448,7 @@ run_single_experiment() {
         fi
 
         if [ "$TEST_MODE" = true ]; then
-            "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg --test-only 2>&1 || true
-            log_warning "DEIM/CaS-DETR/DQM-DETR/D-FINE test-only: 跳过完整训练，仅验证配置可加载"
+            "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg -u epoches=2
         else
             "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg
         fi

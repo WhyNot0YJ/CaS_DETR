@@ -1,0 +1,16 @@
+__include__: [
+  './dqm_deim_full_default_hgnetv2_s_uadetrac.yml',
+]
+
+output_dir: ./outputs/ablation/dqm_deim_deg_strong_hgnetv2_s_uadetrac
+
+train_dataloader:
+  collate_fn:
+    min_ops: 2
+    max_ops: 3
+    low_light_range: [0.3, 0.75]
+    contrast_range: [0.4, 0.85]
+    noise_std_range: [0.02, 0.06]
+    blur_kernel: 5
+    blur_sigma_range: [0.8, 1.8]
+    fog_alpha_range: [0.15, 0.35]

@@ -1,5 +1,5 @@
 __include__: [
-  './dqm_deim_full_default_hgnetv2_s_dairv2x.yml',
+  '../degradation/dqm_deim_full_default_hgnetv2_s_dairv2x.yml',
 ]
 
 output_dir: ./outputs/ablation/dqm_deim_degradation_only_hgnetv2_s_dairv2x

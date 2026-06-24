@@ -1,0 +1,16 @@
+__include__: [
+  './dqm_deim_full_default_hgnetv2_s_dawn.yml',
+]
+
+output_dir: ./outputs/ablation/dqm_deim_deg_mild_hgnetv2_s_dawn
+
+train_dataloader:
+  collate_fn:
+    min_ops: 1
+    max_ops: 1
+    low_light_range: [0.65, 0.9]
+    contrast_range: [0.75, 0.95]
+    noise_std_range: [0.005, 0.02]
+    blur_kernel: 3
+    blur_sigma_range: [0.2, 0.8]
+    fog_alpha_range: [0.04, 0.12]
