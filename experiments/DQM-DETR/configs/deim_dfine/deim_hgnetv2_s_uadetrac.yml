@@ -13,7 +13,7 @@ no_aug_epoch: 12
 warmup_iter: 500
 
 train_dataloader:
-  total_batch_size: 24
+  total_batch_size: 16
   num_workers: 8
   dataset:
     transforms:
