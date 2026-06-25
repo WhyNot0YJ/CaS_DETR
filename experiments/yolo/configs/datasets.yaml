@@ -34,3 +34,20 @@ datasets:
       - van
       - bus
       - others
+
+  dawn:
+    aliases:
+      - DAWN_YOLO
+      - DAWN
+    data_yaml: "/root/autodl-fs/datasets/DAWN_YOLO/dawn_all.yaml"
+    coco_data_root: "/root/autodl-fs/datasets/DAWN_COCO"
+    detr_dataset_class: "CocoFolderDetection"
+    num_classes: 7
+    class_names:
+      - car
+      - truck
+      - person
+      - bus
+      - motorcycle
+      - bicycle
+      - train

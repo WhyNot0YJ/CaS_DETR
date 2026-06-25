@@ -417,34 +417,99 @@ class BaseYOLOTrainer(ABC):
             return alt
         return primary
 
+    def _resolve_labels_meta_dir(self, data_cfg: dict, root: Path, split: str) -> Path:
+        override_key = f'{split}_labels_meta'
+        override_rel = str(data_cfg.get(override_key, '')).strip()
+        if override_rel:
+            path = Path(override_rel)
+            return path if path.is_absolute() else root / path
+        return self._labels_meta_split_dir(root, split)
+
+    def _resolve_eval_image_dirs(self, value: Any, root: Path) -> List[Path]:
+        if isinstance(value, (list, tuple)):
+            raw_values = value
+        else:
+            raw_values = [value]
+        out = []
+        for raw in raw_values:
+            rel = str(raw).strip()
+            if not rel:
+                continue
+            path = Path(rel)
+            out.append(path if path.is_absolute() else root / path)
+        return out
+
+    def _resolve_coco_ann_file(self, data_cfg: dict, root: Path, split: str) -> Optional[Path]:
+        ann_rel = str(data_cfg.get(f'{split}_coco_ann', '')).strip()
+        if not ann_rel:
+            return None
+        path = Path(ann_rel)
+        return path if path.is_absolute() else root / path
+
+    def _load_coco_meta_by_stem(self, coco_ann_file: Path) -> Dict[str, Dict[str, Any]]:
+        raw_coco = json.loads(coco_ann_file.read_text(encoding='utf-8'))
+        images_by_id = {
+            int(image['id']): image for image in raw_coco.get('images', [])
+        }
+        annotations_by_image: Dict[int, List[Dict[str, Any]]] = {}
+        for ann in raw_coco.get('annotations', []):
+            annotations_by_image.setdefault(int(ann['image_id']), []).append(ann)
+
+        meta_by_stem: Dict[str, Dict[str, Any]] = {}
+        for image_id, image in images_by_id.items():
+            width = float(image['width'])
+            height = float(image['height'])
+            objects = []
+            for ann in annotations_by_image.get(image_id, []):
+                x, y, w, h = map(float, ann['bbox'])
+                objects.append(
+                    {
+                        'class_id': int(ann['category_id']) - 1,
+                        'bbox_yolo': {
+                            'cx': (x + w / 2.0) / width,
+                            'cy': (y + h / 2.0) / height,
+                            'w': w / width,
+                            'h': h / height,
+                        },
+                        'bbox_xyxy': [x, y, x + w, y + h],
+                    }
+                )
+            meta_by_stem[Path(str(image['file_name'])).stem] = {
+                'objects': objects,
+                'weather': image.get('weather', ''),
+            }
+        return meta_by_stem
+
     def _resolve_kitti_eval_splits(
         self, data_cfg: dict, root: Path
-    ) -> List[Tuple[str, Path, Path]]:
+    ) -> List[Tuple[str, List[Path], Optional[Path], Optional[Path]]]:
         """
-        返回 [(split, images_dir, labels_meta_dir), ...]，顺序 **val → test**。
-        对应目录须存在且 labels_meta 下有 JSON。
+        返回 [(split, image_dirs, labels_meta_dir, coco_ann_file), ...]，顺序 **val → test**。
+        对应目录须存在，且 labels_meta 下有 JSON 或配置了 ``{split}_coco_ann``。
         """
         eval_test = self.data_config.get('eval_test_after_training', True)
-        out: List[Tuple[str, Path, Path]] = []
+        out: List[Tuple[str, List[Path], Optional[Path], Optional[Path]]] = []
 
-        val_rel = str(data_cfg.get('val', 'images/val')).strip()
-        val_img_dir = (
-            Path(val_rel) if Path(val_rel).is_absolute() else root / val_rel
+        val_img_dirs = self._resolve_eval_image_dirs(
+            data_cfg.get('val', 'images/val'), root
         )
-        lm_val = self._labels_meta_split_dir(root, 'val')
-        if lm_val.is_dir() and any(lm_val.glob('*.json')):
-            out.append(('val', val_img_dir, lm_val))
+        lm_val = self._resolve_labels_meta_dir(data_cfg, root, 'val')
+        val_ann = self._resolve_coco_ann_file(data_cfg, root, 'val')
+        if (lm_val.is_dir() and any(lm_val.glob('*.json'))) or (
+            val_ann is not None and val_ann.is_file()
+        ):
+            out.append(('val', val_img_dirs, lm_val, val_ann))
 
         test_rel = str(data_cfg.get('test', '')).strip()
         if eval_test and test_rel:
-            test_dir = Path(test_rel) if Path(test_rel).is_absolute() else root / test_rel
-            lm_test = self._labels_meta_split_dir(root, 'test')
-            if (
-                test_dir.is_dir()
-                and lm_test.is_dir()
-                and any(lm_test.glob('*.json'))
-            ):
-                out.append(('test', test_dir, lm_test))
+            test_dirs = self._resolve_eval_image_dirs(data_cfg.get('test', ''), root)
+            lm_test = self._resolve_labels_meta_dir(data_cfg, root, 'test')
+            test_ann = self._resolve_coco_ann_file(data_cfg, root, 'test')
+            has_images = any(path.is_dir() for path in test_dirs)
+            has_meta = lm_test.is_dir() and any(lm_test.glob('*.json'))
+            has_ann = test_ann is not None and test_ann.is_file()
+            if has_images and (has_meta or has_ann):
+                out.append(('test', test_dirs, lm_test, test_ann))
 
         return out
 
@@ -594,18 +659,29 @@ class BaseYOLOTrainer(ABC):
 
         weather_names: List[str] = []
         weather_seen = set()
-        for _, _, labels_meta_dir in splits:
-            for meta_path in labels_meta_dir.glob('*.json'):
+        for _, _, labels_meta_dir, coco_ann_file in splits:
+            if labels_meta_dir and labels_meta_dir.is_dir() and any(labels_meta_dir.glob('*.json')):
+                for meta_path in labels_meta_dir.glob('*.json'):
+                    try:
+                        raw_meta = json.loads(meta_path.read_text(encoding='utf-8'))
+                    except Exception:
+                        continue
+                    if not isinstance(raw_meta, dict):
+                        continue
+                    weather = str(raw_meta.get('weather', '')).strip()
+                    if weather and weather not in weather_seen:
+                        weather_seen.add(weather)
+                        weather_names.append(weather)
+            elif coco_ann_file and coco_ann_file.is_file():
                 try:
-                    raw_meta = json.loads(meta_path.read_text(encoding='utf-8'))
+                    raw_coco = json.loads(coco_ann_file.read_text(encoding='utf-8'))
                 except Exception:
-                    continue
-                if not isinstance(raw_meta, dict):
-                    continue
-                weather = str(raw_meta.get('weather', '')).strip()
-                if weather and weather not in weather_seen:
-                    weather_seen.add(weather)
-                    weather_names.append(weather)
+                    raw_coco = {}
+                for image in raw_coco.get('images', []):
+                    weather = str(image.get('weather', '')).strip()
+                    if weather and weather not in weather_seen:
+                        weather_seen.add(weather)
+                        weather_names.append(weather)
         weather_names = sorted(weather_names)
         for weather in weather_names:
             weather_key = _weather_metric_key(weather)
@@ -634,24 +710,30 @@ class BaseYOLOTrainer(ABC):
             if write_header:
                 writer.writeheader()
 
-            for eval_split, eval_img_dir, labels_meta_dir in splits:
+            for eval_split, eval_img_dirs, labels_meta_dir, coco_ann_file in splits:
                 # ── 3. Per-split: images + meta ───────────────────────────
-                meta_by_stem = {p.stem: p for p in labels_meta_dir.glob('*.json')}
+                if labels_meta_dir and labels_meta_dir.is_dir() and any(labels_meta_dir.glob('*.json')):
+                    meta_by_stem = {p.stem: p for p in labels_meta_dir.glob('*.json')}
+                elif coco_ann_file and coco_ann_file.is_file():
+                    meta_by_stem = self._load_coco_meta_by_stem(coco_ann_file)
+                else:
+                    meta_by_stem = {}
                 if not meta_by_stem:
                     self.logger.warning(
-                        f"labels_meta/{eval_split} 为空，跳过: {labels_meta_dir}"
+                        f"{eval_split} 未找到 labels_meta 或 COCO 标注，跳过"
                     )
                     continue
 
                 eval_images = sorted(
                     p
+                    for eval_img_dir in eval_img_dirs
                     for ext in ('.jpg', '.jpeg', '.png')
                     for p in eval_img_dir.glob(f'*{ext}')
                     if p.stem in meta_by_stem
                 )
                 if not eval_images:
                     self.logger.warning(
-                        f"{eval_split} 无与 meta 匹配的图像: {eval_img_dir}"
+                        f"{eval_split} 无与 meta 匹配的图像: {eval_img_dirs}"
                     )
                     continue
 
@@ -681,8 +763,11 @@ class BaseYOLOTrainer(ABC):
                         img_h, img_w = result.orig_shape
                         img_sizes[img_idx] = (int(img_w), int(img_h))
                         debug_image_ids.add(img_idx)
-                        raw = json.loads(
-                            meta_by_stem[img_path.stem].read_text(encoding='utf-8')
+                        raw_meta = meta_by_stem[img_path.stem]
+                        raw = (
+                            json.loads(raw_meta.read_text(encoding='utf-8'))
+                            if isinstance(raw_meta, Path)
+                            else raw_meta
                         )
                         if isinstance(raw, list):
                             entries = raw

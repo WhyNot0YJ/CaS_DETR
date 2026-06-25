@@ -5,13 +5,13 @@
 #     -r outputs/<your_dair_ckpt>/best_stg2.pth
 #
 # __include__: later overrides earlier.
-#   1. deim_hgnetv2_s_dairv2x.yml supplies model + DAIR-V2X dataset (num_classes=8,
+#   1. dfine_hgnetv2_s_dairv2x.yml supplies model + DAIR-V2X dataset (num_classes=8,
 #      DAIR train/val dataloader).
 #   2. dawn_detection.yml then replaces evaluator (cross_domain_label_map) and
 #      val_dataloader (full DAWN train+val) -- train_dataloader remains DAIR's,
 #      unused under --test-only but referenced by some config-time hooks.
 __include__: [
-  '../deim_dfine/deim_hgnetv2_s_dairv2x.yml',
+  '../dfine/dfine_hgnetv2_s_dairv2x.yml',
   './dawn_detection.yml',
 ]
 
