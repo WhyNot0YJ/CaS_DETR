@@ -5,4 +5,4 @@ __include__: [
 output_dir: ./outputs/ablation/dqm_deim_all_off_hgnetv2_s_uadetrac
 
 weather_subset_eval:
-  every_n_epochs: 10
+  every_n_epochs: 5

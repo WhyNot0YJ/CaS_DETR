@@ -1,12 +1,19 @@
 __include__: [
-  '../../../deim_dfine/deim_hgnetv2_s_uadetrac.yml',
+  '../../deim_dfine/dfine_hgnetv2_s_coco.yml',
+  '../dairv2x_detection.yml',
 ]
 
-output_dir: ./outputs/ablation/dqm_deim_full_default_hgnetv2_s_uadetrac
+output_dir: ./outputs/main/fq_dqm_dfine_full_hgnetv2_s_dairv2x
 
-criterion: DQMDEIMCriterion
+model: DFINE
+criterion: DQMDFINECriterion
+tuning: pretrained/dfine_s_coco.pth
 
-DEIM:
+epoches: 100
+
+DFINE:
+  backbone: HGNetv2
+  encoder: HybridEncoder
   decoder: DQMDFINETransformer
 
 DQMDFINETransformer:
@@ -26,20 +33,21 @@ DQMDFINETransformer:
   num_points: [3, 6, 3]
   cross_attn_method: default
   query_select_method: default
-  activation: silu
-  mlp_act: silu
   dqm_hidden_dim: 128
   dqm_num_heads: 4
   dqm_dropout: 0.0
-  dqm_strength: 1.0
+  dqm_strength: 0.5
   clean_dqm_strength: 0.0
+  feature_adapter_type: dmsr
+  feature_adapter_strength: 0.5
 
-DQMDEIMCriterion:
-  weight_dict: {loss_mal: 1, loss_bbox: 5, loss_giou: 2, loss_fgl: 0.15, loss_ddf: 1.5}
-  losses: ['mal', 'boxes', 'local']
-  gamma: 1.5
+DQMDFINECriterion:
+  weight_dict: {loss_vfl: 1, loss_bbox: 5, loss_giou: 2, loss_fgl: 0.15, loss_ddf: 1.5}
+  losses: ['vfl', 'boxes', 'local']
+  alpha: 0.75
+  gamma: 2.0
   reg_max: 32
-  qmqc_weight: 0.5
+  qmqc_weight: 0.25
   matcher:
     type: HungarianMatcher
     weight_dict: {cost_class: 2, cost_bbox: 5, cost_giou: 2}
@@ -47,9 +55,14 @@ DQMDEIMCriterion:
     gamma: 2.0
 
 train_dataloader:
+  total_batch_size: 16
+  num_workers: 8
+  dataset:
+    transforms:
+      policy:
+        epoch: 88
   collate_fn:
     type: PairedDegradationCollateFunction
-    mixup_epochs: [4, 48]
     stop_epoch: 88
     scale_low_ratio: 0.75
     scale_high_ratio: 1.25
@@ -62,10 +75,19 @@ train_dataloader:
     blur_kernel: 5
     blur_sigma_range: [0.3, 1.2]
     fog_alpha_range: [0.08, 0.22]
+    object_aware: true
+    foreground_strength: 0.75
+    background_strength: 1.25
+
+val_dataloader:
+  total_batch_size: 32
+  num_workers: 8
 
 vis_after_train: True
 vis_num_images: 8
 vis_score_thr: 0.35
 
-weather_subset_eval:
+cross_domain_eval:
+  enable: true
   every_n_epochs: 5
+  config: configs/dataset/dawn_eval_from_dair.yml

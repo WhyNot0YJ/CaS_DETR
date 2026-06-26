@@ -7,7 +7,7 @@ Copyright(c) 2023 lyuwenyu. All Rights Reserved.
 """
 
 
-from .deim import DEIM
+from .deim import DEIM, DFINE
 
 from .matcher import HungarianMatcher
 from .hybrid_encoder import HybridEncoder
@@ -16,3 +16,4 @@ from .rtdetrv2_decoder import RTDETRTransformerv2
 
 from .postprocessor import PostProcessor
 from .deim_criterion import DEIMCriterion, DQMDEIMCriterion
+from .dfine_criterion import DQMDFINECriterion

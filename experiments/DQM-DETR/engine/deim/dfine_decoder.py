@@ -829,6 +829,45 @@ class DegradationQueryModulator(nn.Module):
         return gamma.unsqueeze(1), beta.unsqueeze(1), z_d
 
 
+class DegradationAwareMultiScaleRecalibrator(nn.Module):
+    def __init__(self, hidden_dim=256, state_dim=128, num_levels=3, act='relu'):
+        super().__init__()
+        self.channel_gates = nn.ModuleList([nn.Linear(state_dim, hidden_dim) for _ in range(num_levels)])
+        self.spatial_heads = nn.ModuleList([nn.Conv2d(hidden_dim, 1, 1) for _ in range(num_levels)])
+        self.delta_blocks = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(hidden_dim, hidden_dim, 3, padding=1, groups=hidden_dim),
+                get_activation(act),
+                nn.Conv2d(hidden_dim, hidden_dim, 1),
+            )
+            for _ in range(num_levels)
+        ])
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for channel_gate, spatial_head, delta_block in zip(self.channel_gates, self.spatial_heads, self.delta_blocks):
+            init.constant_(channel_gate.weight, 0)
+            init.constant_(channel_gate.bias, 0)
+            init.constant_(spatial_head.weight, 0)
+            init.constant_(spatial_head.bias, 0)
+            init.constant_(delta_block[-1].weight, 0)
+            init.constant_(delta_block[-1].bias, 0)
+
+    def forward(self, memory, spatial_shapes, z_d):
+        feat_flatten = []
+        start = 0
+        for level, (h, w) in enumerate(spatial_shapes):
+            length = h * w
+            feat = memory[:, start:start + length].transpose(1, 2).reshape(memory.shape[0], memory.shape[-1], h, w)
+            channel_gate = torch.sigmoid(self.channel_gates[level](z_d)).unsqueeze(-1).unsqueeze(-1)
+            spatial_gate = torch.sigmoid(self.spatial_heads[level](feat))
+            delta = self.delta_blocks[level](feat)
+            feat_delta = channel_gate * spatial_gate * delta
+            feat_flatten.append(feat_delta.flatten(2).permute(0, 2, 1))
+            start += length
+        return torch.cat(feat_flatten, dim=1)
+
+
 @register()
 class DQMDFINETransformer(DFINETransformer):
     def __init__(
@@ -838,11 +877,14 @@ class DQMDFINETransformer(DFINETransformer):
         dqm_dropout=0.0,
         dqm_strength=1.0,
         clean_dqm_strength=0.0,
+        feature_adapter_type=None,
+        feature_adapter_strength=0.0,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.dqm_strength = dqm_strength
         self.clean_dqm_strength = clean_dqm_strength
+        self.feature_adapter_strength = feature_adapter_strength
         self.dqm = DegradationQueryModulator(
             self.hidden_dim,
             dqm_hidden_dim,
@@ -850,12 +892,30 @@ class DQMDFINETransformer(DFINETransformer):
             dqm_dropout=dqm_dropout,
             act=kwargs.get('mlp_act', 'relu'),
         )
+        if feature_adapter_type in (None, 'none'):
+            self.feature_adapter = None
+        elif feature_adapter_type == 'dmsr':
+            self.feature_adapter = DegradationAwareMultiScaleRecalibrator(
+                self.hidden_dim,
+                state_dim=dqm_hidden_dim,
+                num_levels=self.num_levels,
+                act=kwargs.get('mlp_act', 'relu'),
+            )
+        else:
+            raise ValueError(f'Unsupported feature_adapter_type: {feature_adapter_type}')
 
-    def _apply_dqm(self, content, memory, dn_meta=None, dqm_branch='degraded'):
-        gamma, beta, z_d = self.dqm(memory)
+    def _get_dqm_state(self, memory):
+        return self.dqm(memory)
+
+    def _apply_feature_adapter(self, memory, spatial_shapes, z_d, dqm_branch='degraded'):
+        if self.feature_adapter is None or self.feature_adapter_strength == 0 or dqm_branch == 'clean':
+            return memory
+        return memory + self.feature_adapter_strength * self.feature_adapter(memory, spatial_shapes, z_d)
+
+    def _apply_query_dqm(self, content, gamma, beta, dn_meta=None, dqm_branch='degraded'):
         strength = self.clean_dqm_strength if dqm_branch == 'clean' else self.dqm_strength
         if strength == 0:
-            return content, z_d
+            return content
 
         split = 0
         if dn_meta is not None:
@@ -867,10 +927,17 @@ class DQMDFINETransformer(DFINETransformer):
             content = torch.cat([content[:, :split], query], dim=1)
         else:
             content = query
+        return content
+
+    def _apply_dqm(self, content, memory, dn_meta=None, dqm_branch='degraded'):
+        gamma, beta, z_d = self._get_dqm_state(memory)
+        content = self._apply_query_dqm(content, gamma, beta, dn_meta, dqm_branch)
         return content, z_d
 
     def forward(self, feats, targets=None, dqm_branch='degraded'):
         memory, spatial_shapes = self._get_encoder_input(feats)
+        gamma, beta, degradation_state = self._get_dqm_state(memory)
+        memory = self._apply_feature_adapter(memory, spatial_shapes, degradation_state, dqm_branch)
 
         if self.training and self.num_denoising > 0:
             denoising_logits, denoising_bbox_unact, attn_mask, dn_meta = \
@@ -888,7 +955,7 @@ class DQMDFINETransformer(DFINETransformer):
         init_ref_contents, init_ref_points_unact, enc_topk_bboxes_list, enc_topk_logits_list = \
             self._get_decoder_input(memory, spatial_shapes, denoising_logits, denoising_bbox_unact)
 
-        init_ref_contents, degradation_state = self._apply_dqm(init_ref_contents, memory, dn_meta, dqm_branch)
+        init_ref_contents = self._apply_query_dqm(init_ref_contents, gamma, beta, dn_meta, dqm_branch)
 
         decoder_outputs = self.decoder(
             init_ref_contents,

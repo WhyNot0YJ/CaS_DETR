@@ -226,6 +226,9 @@ class PairedDegradationCollateFunction(BatchImageCollateFunction):
         blur_kernel=5,
         blur_sigma_range=[0.3, 1.2],
         fog_alpha_range=[0.08, 0.22],
+        object_aware=False,
+        foreground_strength=0.75,
+        background_strength=1.25,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -238,6 +241,9 @@ class PairedDegradationCollateFunction(BatchImageCollateFunction):
         self.blur_kernel = blur_kernel
         self.blur_sigma_range = blur_sigma_range
         self.fog_alpha_range = fog_alpha_range
+        self.object_aware = object_aware
+        self.foreground_strength = foreground_strength
+        self.background_strength = background_strength
 
     def _uniform(self, value_range):
         return random.uniform(float(value_range[0]), float(value_range[1]))
@@ -263,10 +269,42 @@ class PairedDegradationCollateFunction(BatchImageCollateFunction):
         veil = torch.full_like(image, 0.75)
         return image * (1.0 - alpha) + veil * alpha
 
-    def _degrade_one(self, image):
+    def _foreground_mask(self, target, height, width, device, dtype):
+        mask = torch.zeros(1, height, width, device=device, dtype=dtype)
+        boxes = target.get('boxes') if target is not None else None
+        if boxes is None or boxes.numel() == 0:
+            return mask
+
+        boxes = boxes.to(device=device, dtype=dtype)
+        x1 = (boxes[:, 0] - boxes[:, 2] * 0.5) * width
+        y1 = (boxes[:, 1] - boxes[:, 3] * 0.5) * height
+        x2 = (boxes[:, 0] + boxes[:, 2] * 0.5) * width
+        y2 = (boxes[:, 1] + boxes[:, 3] * 0.5) * height
+
+        for left, top, right, bottom in zip(x1, y1, x2, y2):
+            left = int(torch.floor(left).clamp(0, width).item())
+            top = int(torch.floor(top).clamp(0, height).item())
+            right = int(torch.ceil(right).clamp(0, width).item())
+            bottom = int(torch.ceil(bottom).clamp(0, height).item())
+            if right > left and bottom > top:
+                mask[:, top:bottom, left:right] = 1
+        return mask
+
+    def _apply_object_aware_strength(self, clean, degraded, target):
+        _, height, width = clean.shape
+        mask = self._foreground_mask(target, height, width, clean.device, clean.dtype)
+        strength = torch.where(
+            mask > 0,
+            torch.as_tensor(self.foreground_strength, device=clean.device, dtype=clean.dtype),
+            torch.as_tensor(self.background_strength, device=clean.device, dtype=clean.dtype),
+        )
+        return clean + (degraded - clean) * strength
+
+    def _degrade_one(self, image, target=None):
         if random.random() >= self.degradation_prob:
             return image
 
+        clean = image
         ops = [
             self._apply_low_light,
             self._apply_contrast,
@@ -277,9 +315,11 @@ class PairedDegradationCollateFunction(BatchImageCollateFunction):
         num_ops = random.randint(int(self.min_ops), int(self.max_ops))
         for op in random.sample(ops, k=min(num_ops, len(ops))):
             image = op(image)
+        if self.object_aware:
+            image = self._apply_object_aware_strength(clean, image, target)
         return image.clamp(0.0, 1.0)
 
     def __call__(self, items):
         images, targets = super().__call__(items)
-        degraded = torch.stack([self._degrade_one(image.clone()) for image in images], dim=0)
+        degraded = torch.stack([self._degrade_one(image.clone(), target) for image, target in zip(images, targets)], dim=0)
         return {'clean': images, 'degraded': degraded, 'targets': targets}

@@ -437,11 +437,9 @@ def _maybe_run_cross_domain_csv_row(
     device,
     csv_path: Path,
     model_name: str,
-    dataset_name: str,
     bench_dict: Optional[Dict[str, Any]],
-    append_csv: bool,
 ) -> bool:
-    """If ``cross_domain_eval`` is configured, run inference on its val set and append a CSV row.
+    """If ``cross_domain_eval`` is configured, run inference on its val set and write a DAWN CSV row.
 
     Returns True iff a row was written.
     """
@@ -500,7 +498,7 @@ def _maybe_run_cross_domain_csv_row(
         json.dump(coco_gt, fh)
         tmp_ann = fh.name
     try:
-        metrics, class_names, weather_buckets = compute_cas_metrics(tmp_ann, preds, dataset_name)
+        metrics, class_names, weather_buckets = compute_cas_metrics(tmp_ann, preds, "DAWN")
     finally:
         try:
             os.remove(tmp_ann)
@@ -508,17 +506,19 @@ def _maybe_run_cross_domain_csv_row(
             pass
 
     log_detr_eval_summary(LOG, "cross_domain_dawn", metrics, bench_dict)
+    dawn_csv_path = csv_path.with_name(f"{csv_path.stem}_dawn{csv_path.suffix}")
     write_eval_csv(
-        csv_path,
+        dawn_csv_path,
         model=model_name,
-        dataset=dataset_name,
+        dataset="DAWN",
         eval_split="cross_domain_dawn",
         metrics=metrics,
         class_names=class_names,
-        append=append_csv,
+        append=dawn_csv_path.exists(),
         benchmark=bench_dict,
         weather_buckets=weather_buckets or None,
     )
+    LOG.info("[CrossDomain/CSV] Wrote %s", dawn_csv_path)
     return True
 
 
@@ -728,9 +728,7 @@ def main():
         device=device,
         csv_path=csv_path,
         model_name=model_name,
-        dataset_name=dataset_name,
         bench_dict=bench_dict,
-        append_csv=append_csv or wrote_any,
     )
     if cd_wrote:
         wrote_any = True

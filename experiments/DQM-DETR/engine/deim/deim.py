@@ -6,7 +6,7 @@ import torch.nn as nn
 from ..core import register
 
 
-__all__ = ['DEIM', ]
+__all__ = ['DEIM', 'DFINE']
 
 
 @register()
@@ -36,3 +36,8 @@ class DEIM(nn.Module):
             if hasattr(m, 'convert_to_deploy'):
                 m.convert_to_deploy()
         return self
+
+
+@register()
+class DFINE(DEIM):
+    """D-FINE semantic alias for the generic backbone-encoder-decoder wrapper."""
