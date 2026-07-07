@@ -251,7 +251,6 @@ def benchmark_model(
     else:
         imgsz_tuple = (int(imgsz[0]), int(imgsz[1]))
 
-    gflops = compute_gflops(model, list(imgsz_tuple), device)
     total_p, train_p = compute_params(model)
     active_p = compute_active_params(model)
 
@@ -272,6 +271,8 @@ def benchmark_model(
             use_fp16=False,
             postprocess_fn=postprocess_fn,
         )
+
+    gflops = compute_gflops(model, list(imgsz_tuple), device)
 
     return BenchmarkResult(
         model_name=model_name,
