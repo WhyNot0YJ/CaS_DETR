@@ -347,8 +347,10 @@ declare -A DQM_DEGRADATION_CONFIGS=(
 )
 
 declare -A DQM_MAIN_CONFIGS=(
-    ["dqmdeim-full-dqm05-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_dairv2x.yml"
-    ["dqmdeim-full-dqm05-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_uadetrac.yml"
+    ["dqmdeim-full-default-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_default_hgnetv2_s_dairv2x.yml"
+    ["dqmdeim-full-default-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_default_hgnetv2_s_uadetrac.yml"
+    # ["dqmdeim-full-dqm05-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_dairv2x.yml"
+    # ["dqmdeim-full-dqm05-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm05_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-full-dqm15-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm15_hgnetv2_s_dairv2x.yml"
     ["dqmdeim-full-dqm15-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_dqm15_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-full-qmqc025-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc025_hgnetv2_s_dairv2x.yml"
