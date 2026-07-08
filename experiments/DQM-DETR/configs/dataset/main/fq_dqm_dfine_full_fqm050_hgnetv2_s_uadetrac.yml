@@ -1,0 +1,8 @@
+__include__: [
+  './fq_dqm_dfine_full_hgnetv2_s_uadetrac.yml',
+]
+
+output_dir: ./outputs/main/fq_dqm_dfine_full_fqm050_hgnetv2_s_uadetrac
+
+DQMDFINETransformer:
+  feature_adapter_strength: 0.5

@@ -357,9 +357,29 @@ declare -A DQM_MAIN_CONFIGS=(
     ["dqmdeim-full-qmqc025-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc025_hgnetv2_s_uadetrac.yml"
     ["dqmdeim-full-qmqc100-dairv2x"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc100_hgnetv2_s_dairv2x.yml"
     ["dqmdeim-full-qmqc100-uadetrac"]="DQM-DETR/configs/dataset/main/dqm_deim_full_qmqc100_hgnetv2_s_uadetrac.yml"
+    ["fqdqmdfine-full-dairv2x"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_hgnetv2_s_dairv2x.yml"
+    ["fqdqmdfine-full-uadetrac"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_hgnetv2_s_uadetrac.yml"
 )
 
 # 兼容旧版：DQM_DETR_CONFIGS 合并消融子组 + 主实验（--dqm_detr 一键运行全部）
+declare -A FQ_DQM_DFINE_PROB_CONFIGS=(
+    ["fqdqmdfine-prob050-dairv2x"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_prob050_hgnetv2_s_dairv2x.yml"
+    ["fqdqmdfine-prob050-uadetrac"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_prob050_hgnetv2_s_uadetrac.yml"
+    ["fqdqmdfine-prob070-dairv2x"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_prob070_hgnetv2_s_dairv2x.yml"
+    ["fqdqmdfine-prob070-uadetrac"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_prob070_hgnetv2_s_uadetrac.yml"
+    ["fqdqmdfine-prob100-dairv2x"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_prob100_hgnetv2_s_dairv2x.yml"
+    ["fqdqmdfine-prob100-uadetrac"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_prob100_hgnetv2_s_uadetrac.yml"
+)
+
+declare -A FQ_DQM_DFINE_FQM_CONFIGS=(
+    ["fqdqmdfine-fqm025-dairv2x"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_fqm025_hgnetv2_s_dairv2x.yml"
+    ["fqdqmdfine-fqm025-uadetrac"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_fqm025_hgnetv2_s_uadetrac.yml"
+    ["fqdqmdfine-fqm050-dairv2x"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_fqm050_hgnetv2_s_dairv2x.yml"
+    ["fqdqmdfine-fqm050-uadetrac"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_fqm050_hgnetv2_s_uadetrac.yml"
+    ["fqdqmdfine-fqm100-dairv2x"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_fqm100_hgnetv2_s_dairv2x.yml"
+    ["fqdqmdfine-fqm100-uadetrac"]="DQM-DETR/configs/dataset/main/fq_dqm_dfine_full_fqm100_hgnetv2_s_uadetrac.yml"
+)
+
 declare -A DQM_DETR_CONFIGS=()
 for _key in "${!DQM_MODULE_ABLATION_CONFIGS[@]}"; do DQM_DETR_CONFIGS[$_key]="${DQM_MODULE_ABLATION_CONFIGS[$_key]}"; done
 for _key in "${!DQM_DEGRADATION_CONFIGS[@]}"; do DQM_DETR_CONFIGS[$_key]="${DQM_DEGRADATION_CONFIGS[$_key]}"; done
@@ -797,6 +817,8 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
     local has_dqm_module_ablation=false
     local has_dqm_degradation=false
     local has_dqm_main=false
+    local has_fq_dqm_prob=false
+    local has_fq_dqm_fqm=false
     local has_cas_caip=false
     local has_cas_caip_base05=false
     local has_cas_pack_moe4_base03_a10=false
@@ -834,6 +856,12 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
                 ;;
             --dqm_main|--dqm-main)
                 has_dqm_main=true
+                ;;
+            --fq_dqm_prob|--fq-dqm-prob|--fqdqmdfine-prob)
+                has_fq_dqm_prob=true
+                ;;
+            --fq_dqm_fqm|--fq-dqm-fqm|--fqdqmdfine-fqm)
+                has_fq_dqm_fqm=true
                 ;;
             --cas_caip)
                 has_cas_caip=true
@@ -884,7 +912,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
@@ -893,6 +921,8 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         [ "$has_dqm_module_ablation" = true ] && selected_types+=("DQM_ModuleAblation")
         [ "$has_dqm_degradation" = true ] && selected_types+=("DQM_Degradation")
         [ "$has_dqm_main" = true ] && selected_types+=("DQM_Main")
+        [ "$has_fq_dqm_prob" = true ] && selected_types+=("FQ_DQM_DFINE_Prob")
+        [ "$has_fq_dqm_fqm" = true ] && selected_types+=("FQ_DQM_DFINE_FQM")
         [ "$has_cas_caip" = true ] && selected_types+=("CaS_DETR_CAIP")
         [ "$has_cas_caip_base05" = true ] && selected_types+=("CaS_DETR_CAIP_rbase0.5_a1.0")
         [ "$has_cas_pack_moe4_base03_a10" = true ] && selected_types+=("CaS_DETR_PACK_moe4_base03_a10")
@@ -962,6 +992,24 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         if [ "$has_dqm_main" = true ]; then
             for key in $(printf '%s\n' "${!DQM_MAIN_CONFIGS[@]}" | sort); do
                 local p="${DQM_MAIN_CONFIGS[$key]}"
+                if filter_config "$p"; then
+                    CONFIGS_TO_RUN+=("$p")
+                fi
+            done
+        fi
+
+        if [ "$has_fq_dqm_prob" = true ]; then
+            for key in $(printf '%s\n' "${!FQ_DQM_DFINE_PROB_CONFIGS[@]}" | sort); do
+                local p="${FQ_DQM_DFINE_PROB_CONFIGS[$key]}"
+                if filter_config "$p"; then
+                    CONFIGS_TO_RUN+=("$p")
+                fi
+            done
+        fi
+
+        if [ "$has_fq_dqm_fqm" = true ]; then
+            for key in $(printf '%s\n' "${!FQ_DQM_DFINE_FQM_CONFIGS[@]}" | sort); do
+                local p="${FQ_DQM_DFINE_FQM_CONFIGS[$key]}"
                 if filter_config "$p"; then
                     CONFIGS_TO_RUN+=("$p")
                 fi
