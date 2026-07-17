@@ -64,7 +64,7 @@ from common.det_eval_metrics import write_eval_csv
 from yolo_validator_utils import MetricsLogger
 
 # Ultralytics ``cfg/default.yaml``：未指定 batch 时为 16
-DEFAULT_TRAIN_BATCH = 8
+DEFAULT_TRAIN_BATCH = 16
 
 
 class BaseYOLOTrainer(ABC):
