@@ -347,30 +347,23 @@ class TransformerDecoder(nn.Module):
         self.lqe_layers = nn.ModuleList([nn.Identity()] * (self.eval_idx) + [self.lqe_layers[self.eval_idx]])
 
     def get_moe_load_balance_loss(self):
-        router_logits_list = []
-        expert_indices_list = []
-        num_experts = None
-        top_k = 2
-        for layer in self.layers:
-            if not getattr(layer, 'use_moe', False):
-                continue
-            moe_layer = layer.decoder_moe_layer
-            router_logits_list.extend(moe_layer.router_logits_cache)
-            expert_indices_list.extend(moe_layer.expert_indices_cache)
-            num_experts = moe_layer.num_experts
-            top_k = moe_layer.top_k
+        losses = []
+        try:
+            for layer in self.layers:
+                if getattr(layer, 'use_moe', False):
+                    losses.extend(layer.decoder_moe_layer._balance_loss_cache)
 
-        if num_experts is None:
+            if losses:
+                return torch.stack(losses).mean()
+
             ref_tensor = self.up if isinstance(self.up, torch.Tensor) else None
             device = ref_tensor.device if ref_tensor is not None else 'cpu'
             return torch.tensor(0.0, device=device)
-
-        return compute_moe_balance_loss(
-            router_logits_list=router_logits_list,
-            num_experts=num_experts,
-            expert_indices_list=expert_indices_list,
-            top_k=top_k,
-        )
+        finally:
+            # A routing cache belongs to one model forward only.
+            for layer in self.layers:
+                if getattr(layer, 'use_moe', False):
+                    layer.decoder_moe_layer.reset_cache()
 
     def forward(self,
                 target,

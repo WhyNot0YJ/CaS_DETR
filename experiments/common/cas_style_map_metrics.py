@@ -17,6 +17,7 @@ from pycocotools.cocoeval import COCOeval
 from common.det_eval_metrics import (
     coco_ap_at_iou50_all,
     coco_area_ap_at_iou50,
+    canonical_category_metric_name,
     extract_per_category_ap_from_coco_eval,
 )
 
@@ -151,8 +152,9 @@ def compute_cas_style_map_metrics(
         }
 
         for cat_name in per_cat_5095.keys():
-            result[f"AP50_{cat_name}"] = per_cat_50.get(cat_name, 0.0)
-            result[f"AP5095_{cat_name}"] = per_cat_5095[cat_name]
+            suffix = canonical_category_metric_name(cat_name)
+            result[f"AP50_{suffix}"] = per_cat_50.get(cat_name, 0.0)
+            result[f"AP5095_{suffix}"] = per_cat_5095[cat_name]
 
         return result
     except Exception as exc:

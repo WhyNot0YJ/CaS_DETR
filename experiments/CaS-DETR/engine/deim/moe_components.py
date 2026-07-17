@@ -56,11 +56,15 @@ class MoELayer(nn.Module):
         # [修复] 缓存改为列表，以支持共享层多次 forward 的记录
         self.router_logits_cache = []
         self.expert_indices_cache = []
+        # Routing statistics are detached; only the scalar auxiliary loss
+        # retains the graph until it is consumed after this forward.
+        self._balance_loss_cache = []
 
     def reset_cache(self):
         """用于在共享层模式下，每个 Batch 开始前清空记录"""
         self.router_logits_cache = []
         self.expert_indices_cache = []
+        self._balance_loss_cache = []
     
     def forward(self, x: torch.Tensor, spatial_shape: Optional[Tuple[int, int]] = None,
                 dynamic_top_k: Optional[int] = None) -> torch.Tensor:
@@ -84,30 +88,55 @@ class MoELayer(nn.Module):
         if self.training and self.noise_std > 0:
             noise = torch.randn_like(router_logits) * self.noise_std
             router_logits = router_logits + noise
-        router_probs = F.softmax(router_logits, dim=-1)  # [B, N, E]
-        expert_weights, expert_indices = torch.topk(router_probs, K, dim=-1)  # [B, N, K]
+        if torch.onnx.is_in_onnx_export():
+            # TopK is invariant under softmax. Normalizing only the selected logits
+            # removes the full-router softmax and the subsequent renormalization.
+            expert_logits, expert_indices = torch.topk(router_logits, K, dim=-1)
+            expert_weights = F.softmax(expert_logits, dim=-1)
+        else:
+            router_probs = F.softmax(router_logits, dim=-1)  # [B, N, E]
+            expert_weights, expert_indices = torch.topk(router_probs, K, dim=-1)  # [B, N, K]
+
+            # Renormalize expert weights
+            expert_weights = expert_weights / (expert_weights.sum(dim=-1, keepdim=True) + 1e-9)
         
-        # Renormalize expert weights
-        expert_weights = expert_weights / (expert_weights.sum(dim=-1, keepdim=True) + 1e-9)
-        
-        # [修复] 列表化存储，防止共享层覆盖
-        self.router_logits_cache.append(router_logits.view(-1, E))
-        self.expert_indices_cache.append(expert_indices.view(-1, K))
+        if self.training and not torch.onnx.is_in_onnx_export():
+            # Preserve gradients for the auxiliary loss without retaining the
+            # large router tensors in the statistics cache.
+            self._balance_loss_cache.append(compute_moe_balance_loss(
+                [router_logits.reshape(-1, E)],
+                num_experts=E,
+                expert_indices_list=[expert_indices.reshape(-1, K)],
+                top_k=K,
+            ))
+        elif not torch.onnx.is_in_onnx_export():
+            # These tensors are needed only by eval-time router diagnostics.
+            # Never retain them during training: even detached GPU tensors can
+            # raise the peak memory substantially on large token batches.
+            self.router_logits_cache.append(router_logits.detach().reshape(-1, E))
+            self.expert_indices_cache.append(expert_indices.detach().reshape(-1, K))
 
         x_flat = x.view(-1, C)
-        out_flat = torch.zeros_like(x_flat)
-        
-        # Flatten expert mapping for efficient indexing
         flat_expert_indices = expert_indices.view(-1, K)
         flat_expert_weights = expert_weights.view(-1, K)
+        if torch.onnx.is_in_onnx_export():
+            h = torch.matmul(x_flat.unsqueeze(0), self.expert_w1.transpose(1, 2))
+            h = self.dropout(self.activation(h + self.expert_b1.unsqueeze(1)))
+            expert_out = torch.matmul(h, self.expert_w2.transpose(1, 2))
+            expert_out = expert_out + self.expert_b2.unsqueeze(1)
+            gate = (
+                F.one_hot(flat_expert_indices, E).to(flat_expert_weights.dtype)
+                * flat_expert_weights.unsqueeze(-1)
+            ).sum(dim=1)
+            out_flat = (expert_out.permute(1, 0, 2) * gate.unsqueeze(-1)).sum(dim=1)
+            return out_flat.view(B, N, C)
+
+        out_flat = torch.zeros_like(x_flat)
         
         # 2. Key Fix: Loop over experts and process assigned tokens as a group
         for i in range(E):
             # Find tokens assigned to current expert i
             token_indices, slot_indices = torch.where(flat_expert_indices == i)
-            if token_indices.numel() == 0:
-                continue
-                
             # Extract only the tokens that need this expert
             temp_x = x_flat[token_indices]
             

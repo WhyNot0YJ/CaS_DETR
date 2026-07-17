@@ -5,7 +5,9 @@ YOLO 训练器基类：减少重复，支持 YOLO v8、v10、v11、v12
 
 import sys
 import os
+import gc
 import json
+import subprocess
 import yaml
 import torch
 import logging
@@ -39,26 +41,30 @@ from common.vram_batch import (
 )
 from common.model_benchmark import (
     BENCHMARK_EVAL_METRIC_KEYS,
+    END_TO_END_EVAL_METRIC_KEYS,
     benchmark_to_dict,
     format_benchmark_eval_line,
     format_eval_csv_cell,
     log_benchmark,
     merge_benchmark_dict_into_metrics,
 )
+from common.result_paths import result_csv
 from common.det_eval_metrics import (
     PYCOCOTOOLS_AVAILABLE,
     coco_ap_at_iou50_all,
     coco_area_ap_at_iou50,
     coco_area_bucket_counts_from_xywh_annotations,
+    canonical_category_metric_name,
     extract_per_category_ap_from_coco_eval,
     format_area_bucket_counts,
     run_coco_bbox_eval,
 )
+from common.det_eval_metrics import write_eval_csv
 
 from yolo_validator_utils import MetricsLogger
 
 # Ultralytics ``cfg/default.yaml``：未指定 batch 时为 16
-DEFAULT_TRAIN_BATCH = 16
+DEFAULT_TRAIN_BATCH = 8
 
 
 class BaseYOLOTrainer(ABC):
@@ -322,8 +328,9 @@ class BaseYOLOTrainer(ABC):
             train_kwargs['device'] = self.misc_config['device']
         if 'num_workers' in self.misc_config:
             train_kwargs['workers'] = self.misc_config['num_workers']
-        if 'exist_ok' in self.checkpoint_config:
-            train_kwargs['exist_ok'] = self.checkpoint_config['exist_ok']
+        # ``setup_logging`` creates the intended run directory before Ultralytics starts.
+        # Reuse it so weights and post-training TensorRT lookup stay in the same path.
+        train_kwargs['exist_ok'] = self.checkpoint_config.get('exist_ok', True)
         return train_kwargs
 
     def _log_training_config(self, train_kwargs: Dict):
@@ -554,6 +561,29 @@ class BaseYOLOTrainer(ABC):
         """If True, run KITTI/scale eval even when ``model`` is None (e.g. YOLOX)."""
         return False
 
+    def _canonical_dataset_name(self) -> str:
+        """
+        Return a stable human-readable dataset label.
+
+        We prefer matching against the full configured ``data_yaml`` path first,
+        because some datasets use generic filenames such as ``data.yaml`` whose
+        stem alone is not descriptive enough.
+        """
+        data_yaml = str(self.data_config.get('data_yaml', '') or '')
+        data_lower = data_yaml.lower()
+        if 'dairv2x' in data_lower or 'dair-v2x' in data_lower or 'dair' in data_lower:
+            return 'DAIR-V2X'
+        if 'uadetrac' in data_lower or 'ua-detrac' in data_lower:
+            return 'UA-DETRAC'
+
+        stem = Path(data_yaml).stem or 'unknown'
+        stem_lower = stem.lower()
+        if 'dairv2x' in stem_lower or 'dair' in stem_lower:
+            return 'DAIR-V2X'
+        if 'uadetrac' in stem_lower or 'ua-detrac' in stem_lower:
+            return 'UA-DETRAC'
+        return stem
+
     def _evaluate_kitti_scale_after_training(self, model, bench_dict=None) -> dict:
         """
         训练结束后的 KITTI / multi-scale mAP：
@@ -633,24 +663,9 @@ class BaseYOLOTrainer(ABC):
         model_name = self.model_config.get('model_name', f'yolov{self.VERSION}n')
         if model_name.endswith('.pt'):
             model_name = model_name[:-3]
-        dataset_name = Path(self.data_config.get('data_yaml', '')).stem or 'unknown'
-        if 'dairv2x' in dataset_name.lower() or 'dair' in dataset_name.lower():
-            dataset_name = 'DAIR-V2X'
-        elif 'uadetrac' in dataset_name.lower() or 'ua-detrac' in dataset_name.lower():
-            dataset_name = 'UA-DETRAC'
+        dataset_name = self._canonical_dataset_name()
 
-        import csv
-        fieldnames = [
-            'model', 'dataset', 'eval_split',
-            'mAP_50_all', 'mAP_5095_all',
-            'mAP_small', 'mAP_medium', 'mAP_large',
-            'mAP_small_5095', 'mAP_medium_5095', 'mAP_large_5095',
-            *BENCHMARK_EVAL_METRIC_KEYS,
-        ]
         class_names = self.class_names if self.class_names else [f'cls_{i}' for i in range(nc)]
-        for name in class_names:
-            fieldnames.append(f'AP50_{name}')
-            fieldnames.append(f'AP5095_{name}')
 
         def _weather_metric_key(value: str) -> str:
             key = ''.join(ch.lower() if ch.isalnum() else '_' for ch in str(value))
@@ -683,33 +698,11 @@ class BaseYOLOTrainer(ABC):
                         weather_seen.add(weather)
                         weather_names.append(weather)
         weather_names = sorted(weather_names)
-        for weather in weather_names:
-            weather_key = _weather_metric_key(weather)
-            fieldnames.append(f'mAP_50_weather_{weather_key}')
-            fieldnames.append(f'mAP_5095_weather_{weather_key}')
-
-        summary_csv = self.log_dir.parent / 'eval_metrics.csv'
-        write_header = not summary_csv.exists() or summary_csv.stat().st_size == 0
-        if summary_csv.exists() and summary_csv.stat().st_size > 0:
-            with summary_csv.open('r', newline='', encoding='utf-8') as existing_fh:
-                reader = csv.DictReader(existing_fh)
-                existing_fieldnames = reader.fieldnames or []
-                missing_fieldnames = [name for name in fieldnames if name not in existing_fieldnames]
-                if missing_fieldnames:
-                    existing_rows = list(reader)
-                    fieldnames = existing_fieldnames + missing_fieldnames
-                    with summary_csv.open('w', newline='', encoding='utf-8') as rewrite_fh:
-                        rewrite_writer = csv.DictWriter(rewrite_fh, fieldnames=fieldnames, extrasaction='ignore')
-                        rewrite_writer.writeheader()
-                        rewrite_writer.writerows(existing_rows)
-                    write_header = False
+        weather_buckets = [_weather_metric_key(weather) for weather in weather_names]
+        summary_csv = result_csv('eval_metrics')
         last_metrics: Dict[str, Any] = {}
 
-        with summary_csv.open('a', newline='', encoding='utf-8') as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction='ignore')
-            if write_header:
-                writer.writeheader()
-
+        if True:
             for eval_split, eval_img_dirs, labels_meta_dir, coco_ann_file in splits:
                 # ── 3. Per-split: images + meta ───────────────────────────
                 if labels_meta_dir and labels_meta_dir.is_dir() and any(labels_meta_dir.glob('*.json')):
@@ -905,53 +898,57 @@ class BaseYOLOTrainer(ABC):
                             f"[{eval_split}] COCOeval 失败（pycocotools 运行异常），"
                             "COCO 口径指标置 0"
                         )
-                    metrics['mAP_50_all'] = 0.0
-                    metrics['mAP_5095_all'] = 0.0
-                    metrics['mAP_small'] = 0.0
-                    metrics['mAP_medium'] = 0.0
-                    metrics['mAP_large'] = 0.0
-                    metrics['mAP_small_5095'] = 0.0
-                    metrics['mAP_medium_5095'] = 0.0
-                    metrics['mAP_large_5095'] = 0.0
+                    metrics['mAP_50'] = 0.0
+                    metrics['mAP_5095'] = 0.0
+                    metrics['AP_small_50'] = 0.0
+                    metrics['AP_medium_50'] = 0.0
+                    metrics['AP_large_50'] = 0.0
+                    metrics['AP_small_5095'] = 0.0
+                    metrics['AP_medium_5095'] = 0.0
+                    metrics['AP_large_5095'] = 0.0
                     per_cls_50 = [0.0] * nc
                     per_cls_5095 = [0.0] * nc
                     for i in range(nc):
                         nm = class_names[i]
-                        metrics[f'AP50_{nm}'] = 0.0
-                        metrics[f'AP5095_{nm}'] = 0.0
+                        suffix = canonical_category_metric_name(nm)
+                        metrics[f'AP50_{suffix}'] = 0.0
+                        metrics[f'AP5095_{suffix}'] = 0.0
                 else:
-                    metrics['mAP_50_all'] = coco_ap_at_iou50_all(coco_eval)
-                    metrics['mAP_5095_all'] = (
+                    metrics['mAP_50'] = coco_ap_at_iou50_all(coco_eval)
+                    metrics['mAP_5095'] = (
                         max(0.0, float(coco_eval.stats[0]))
                         if len(coco_eval.stats) > 0
                         else 0.0
                     )
                     s50, m50, l50 = coco_area_ap_at_iou50(coco_eval)
-                    metrics['mAP_small'] = s50
-                    metrics['mAP_medium'] = m50
-                    metrics['mAP_large'] = l50
+                    metrics['AP_small_50'] = s50
+                    metrics['AP_medium_50'] = m50
+                    metrics['AP_large_50'] = l50
                     if len(coco_eval.stats) >= 6:
-                        metrics['mAP_small_5095'] = max(0.0, float(coco_eval.stats[3]))
-                        metrics['mAP_medium_5095'] = max(0.0, float(coco_eval.stats[4]))
-                        metrics['mAP_large_5095'] = max(0.0, float(coco_eval.stats[5]))
+                        metrics['AP_small_5095'] = max(0.0, float(coco_eval.stats[3]))
+                        metrics['AP_medium_5095'] = max(0.0, float(coco_eval.stats[4]))
+                        metrics['AP_large_5095'] = max(0.0, float(coco_eval.stats[5]))
                     else:
-                        metrics['mAP_small_5095'] = 0.0
-                        metrics['mAP_medium_5095'] = 0.0
-                        metrics['mAP_large_5095'] = 0.0
+                        metrics['AP_small_5095'] = 0.0
+                        metrics['AP_medium_5095'] = 0.0
+                        metrics['AP_large_5095'] = 0.0
 
                     per_cat_50, per_cat_5095 = extract_per_category_ap_from_coco_eval(
                         coco_eval, categories_coco
                     )
                     per_cls_50 = [
-                        per_cat_50.get(class_names[i], 0.0) for i in range(nc)
+                        per_cat_50.get(canonical_category_metric_name(class_names[i]), 0.0)
+                        for i in range(nc)
                     ]
                     per_cls_5095 = [
-                        per_cat_5095.get(class_names[i], 0.0) for i in range(nc)
+                        per_cat_5095.get(canonical_category_metric_name(class_names[i]), 0.0)
+                        for i in range(nc)
                     ]
                     for i in range(nc):
                         nm = class_names[i]
-                        metrics[f'AP50_{nm}'] = per_cat_50.get(nm, 0.0)
-                        metrics[f'AP5095_{nm}'] = per_cat_5095.get(nm, 0.0)
+                        suffix = canonical_category_metric_name(nm)
+                        metrics[f'AP50_{suffix}'] = per_cat_50.get(suffix, 0.0)
+                        metrics[f'AP5095_{suffix}'] = per_cat_5095.get(suffix, 0.0)
 
                 weather_log_parts_50 = []
                 weather_log_parts_5095 = []
@@ -994,8 +991,8 @@ class BaseYOLOTrainer(ABC):
                             else 0.0
                         )
                     weather_key = _weather_metric_key(weather)
-                    metrics[f'mAP_50_weather_{weather_key}'] = ap50
-                    metrics[f'mAP_5095_weather_{weather_key}'] = ap5095
+                    metrics[f'weather_{weather_key}_mAP_50'] = ap50
+                    metrics[f'weather_{weather_key}_mAP_5095'] = ap5095
                     weather_log_parts_50.append(f'{weather}={ap50:.4f}')
                     weather_log_parts_5095.append(f'{weather}={ap5095:.4f}')
 
@@ -1004,10 +1001,10 @@ class BaseYOLOTrainer(ABC):
 
                 self.logger.info(
                     f"📐 [{eval_split}] S/M/L  "
-                    f"@0.5: {metrics['mAP_small']:.4f} / {metrics['mAP_medium']:.4f} / "
-                    f"{metrics['mAP_large']:.4f}  |  "
-                    f"@0.5:0.95: {metrics['mAP_small_5095']:.4f} / "
-                    f"{metrics['mAP_medium_5095']:.4f} / {metrics['mAP_large_5095']:.4f}"
+                    f"@0.5: {metrics['AP_small_50']:.4f} / {metrics['AP_medium_50']:.4f} / "
+                    f"{metrics['AP_large_50']:.4f}  |  "
+                    f"@0.5:0.95: {metrics['AP_small_5095']:.4f} / "
+                    f"{metrics['AP_medium_5095']:.4f} / {metrics['AP_large_5095']:.4f}"
                 )
                 cls_50_str = ' | '.join(
                     f'{class_names[i]}={per_cls_50[i]:.4f}' for i in range(nc)
@@ -1029,16 +1026,26 @@ class BaseYOLOTrainer(ABC):
                 if (bm_line := format_benchmark_eval_line(metrics)):
                     self.logger.info(bm_line)
 
-                row = {}
-                for k in fieldnames:
-                    if k in ('model', 'dataset'):
-                        continue
-                    row[k] = (
-                        format_eval_csv_cell(k, metrics[k]) if k in metrics else ''
-                    )
-                row['model'] = model_name
-                row['dataset'] = dataset_name
-                writer.writerow(row)
+                write_eval_csv(
+                    summary_csv,
+                    model=model_name,
+                    dataset=dataset_name,
+                    eval_split=eval_split,
+                    metrics=metrics,
+                    class_names=class_names,
+                    weather_buckets=weather_buckets,
+                    benchmark={
+                        k: v
+                        for k, v in (bench_dict or {}).items()
+                        if k in BENCHMARK_EVAL_METRIC_KEYS or k in END_TO_END_EVAL_METRIC_KEYS
+                    },
+                    metadata={
+                        'run_id': self.log_dir.name,
+                        'framework': 'yolo',
+                        'experiment': self.experiment_name,
+                        'seed': self.config.get('seed', ''),
+                    },
+                )
                 last_metrics = metrics
 
         self.logger.info(f"✓ 指标已追加: {summary_csv}")
@@ -1055,7 +1062,9 @@ class BaseYOLOTrainer(ABC):
             if model_name.endswith('.pt'):
                 model_name = model_name[:-3]
             bench_result = benchmark_yolo(
-                model, imgsz=self.training_config.get('imgsz', 640),
+                model,
+                images=self._benchmark_image_dir(str(self.data_config.get("data_yaml", ""))),
+                imgsz=self.training_config.get('imgsz', 640),
                 device=self.misc_config.get('device', 'cuda'),
                 model_name=model_name,
             )
@@ -1064,6 +1073,81 @@ class BaseYOLOTrainer(ABC):
         except Exception as exc:
             self.logger.warning(f"Model benchmark 失败（不影响评估结果）: {exc}")
         return bench_dict
+
+    def _tensorrt_weights_path(self) -> Optional[Path]:
+        for path in (
+            self.log_dir / "weights" / "best.pt",
+            self.log_dir / "weights" / "last.pt",
+        ):
+            if path.is_file():
+                return path
+        return None
+
+    def _tensorrt_extra_args(self) -> List[str]:
+        return []
+
+    def _benchmark_image_dir(self, data_yaml: str) -> Path:
+        yaml_path = Path(data_yaml).expanduser().resolve()
+        with yaml_path.open(encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+        root = Path(data.get("path", yaml_path.parent)).expanduser()
+        if not root.is_absolute():
+            root = yaml_path.parent / root
+        images = Path(data["val"]).expanduser()
+        if not images.is_absolute():
+            images = root / images
+        if not images.is_dir():
+            raise FileNotFoundError(f"TensorRT benchmark 图像目录不存在: {images}")
+        return images.resolve()
+
+    def run_tensorrt_benchmark(self) -> None:
+        """Export the completed run and append its TensorRT result to shared CSVs."""
+        enabled = os.environ.get(
+            "YOLO_TRT_BENCHMARK", os.environ.get("TRT_BENCHMARK", "1")
+        )
+        if enabled == "0":
+            self.logger.info("TensorRT benchmark 已通过环境变量关闭")
+            return
+
+        weights = self._tensorrt_weights_path()
+        if weights is None:
+            raise FileNotFoundError(f"无可用于 TensorRT benchmark 的权重: {self.log_dir}")
+
+        model_name = str(self.model_config.get("model_name", f"yolov{self.VERSION}n"))
+        if model_name.endswith((".pt", ".pth")):
+            model_name = model_name.rsplit(".", 1)[0]
+        data_yaml = str(self.data_config.get("data_yaml", ""))
+        data_lower = data_yaml.lower()
+        if "dair" in data_lower:
+            dataset = "DAIR-V2X"
+        elif "uadetrac" in data_lower or "ua-detrac" in data_lower:
+            dataset = "UA-DETRAC"
+        else:
+            dataset = Path(data_yaml).stem or "unknown"
+
+        command = [
+            sys.executable,
+            str(_yolo_dir / "tools" / "benchmark_trt.py"),
+            "--weights", str(weights.resolve()),
+            "--output-dir", str(self.log_dir.resolve()),
+            "--images", str(self._benchmark_image_dir(data_yaml)),
+            "--run-id", self.log_dir.name,
+            "--model", model_name,
+            "--dataset", dataset,
+            "--seed", str(self.training_config.get("seed", 0)),
+            "--imgsz", str(self.training_config.get("imgsz", 640)),
+            "--builder", os.environ.get("YOLO_TRT_BUILDER", "auto"),
+            "--trtexec", os.environ.get("TRTEXEC", "trtexec"),
+            "--warmup", os.environ.get("TRT_WARMUP", "100"),
+            "--iterations", os.environ.get("TRT_ITERATIONS", "1000"),
+            *self._tensorrt_extra_args(),
+        ]
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        self.logger.info("🚀 运行 TensorRT benchmark: %s", model_name)
+        subprocess.run(command, cwd=_yolo_dir, check=True)
+        self.logger.info("✓ TensorRT benchmark 已写入统一总表")
 
     def _post_training_processing(self, model=None):
         """训练后处理"""
@@ -1107,12 +1191,14 @@ class BaseYOLOTrainer(ABC):
     def _parse_and_print_training_results(self):
         """解析results.csv并输出"""
         try:
-            results_csv = self.log_dir / "results.csv"
+            results_csv = result_csv("results")
             if not results_csv.exists():
                 self.logger.warning(f"未找到results.csv文件: {results_csv}")
                 return
             
             df = pd.read_csv(results_csv)
+            if 'run_id' in df.columns:
+                df = df[df['run_id'].astype(str) == self.log_dir.name]
             self.logger.info("=" * 80)
             self.logger.info("训练过程摘要:")
             self.logger.info("=" * 80)
@@ -1150,11 +1236,13 @@ class BaseYOLOTrainer(ABC):
     def _plot_training_curves(self):
         """生成训练曲线"""
         try:
-            results_csv = self.log_dir / "results.csv"
+            results_csv = result_csv("results")
             if not results_csv.exists():
                 return
             
             df = pd.read_csv(results_csv)
+            if 'run_id' in df.columns:
+                df = df[df['run_id'].astype(str) == self.log_dir.name]
             epochs = df.get('epoch', range(1, len(df) + 1)).values
             
             # 提取损失

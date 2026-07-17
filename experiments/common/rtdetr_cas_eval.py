@@ -21,6 +21,7 @@ from common.detr_eval_utils import (
     run_detr_benchmark,
     write_detr_eval_csv,
 )
+from common.result_paths import run_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +411,13 @@ def run_rtdetr_cas_style_eval_after_fit(
         class_names,
         bench_dict,
         aggregate_at_parent=False,
+        metadata=run_metadata(
+            run_id=out.name,
+            framework="rtdetr",
+            model=experiment_name,
+            dataset=str(cfg_stub.get("data", {}).get("data_root", "unknown")),
+            seed=getattr(cfg, "seed", ""),
+        ),
     )
     logger.info("✓ best_model [val] 评估完成 → %s", csv_path)
 
@@ -449,5 +457,12 @@ def run_rtdetr_cas_style_eval_after_fit(
         class_names,
         bench_dict,
         aggregate_at_parent=False,
+        metadata=run_metadata(
+            run_id=out.name,
+            framework="rtdetr",
+            model=experiment_name,
+            dataset=str(cfg_stub.get("data", {}).get("data_root", "unknown")),
+            seed=getattr(cfg, "seed", ""),
+        ),
     )
     logger.info("✓ best_model [test] 评估完成 → %s", csv_path_t)

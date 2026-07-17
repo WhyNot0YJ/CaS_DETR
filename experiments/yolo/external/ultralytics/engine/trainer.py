@@ -12,6 +12,8 @@ import os
 import subprocess
 import time
 import warnings
+import sys
+import csv
 from copy import copy, deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,6 +22,11 @@ import numpy as np
 import torch
 from torch import distributed as dist
 from torch import nn, optim
+
+_EXPERIMENTS_DIR = Path(__file__).resolve().parents[4]
+if str(_EXPERIMENTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_EXPERIMENTS_DIR))
+from common.result_paths import append_csv_rows, result_csv
 
 from ultralytics import __version__
 from ultralytics.cfg import get_cfg, get_save_dir
@@ -165,7 +172,8 @@ class BaseTrainer:
         self.loss = None
         self.tloss = None
         self.loss_names = ["Loss"]
-        self.csv = self.save_dir / "results.csv"
+        self.csv = result_csv("results")
+        self.run_id = self.save_dir.name
         self.plot_idx = [0, 1, 2]
 
         # HUB
@@ -542,9 +550,11 @@ class BaseTrainer:
 
     def read_results_csv(self):
         """Read results.csv into a dictionary using polars."""
-        import polars as pl  # scope for faster 'import ultralytics'
-
-        return pl.read_csv(self.csv, infer_schema_length=None).to_dict(as_series=False)
+        with self.csv.open(newline="", encoding="utf-8") as handle:
+            rows = [row for row in csv.DictReader(handle) if row.get("run_id") == self.run_id]
+        if not rows:
+            return {}
+        return {key: [row.get(key, "") for row in rows] for key in rows[0]}
 
     def _model_train(self):
         """Set model in training mode."""
@@ -727,12 +737,19 @@ class BaseTrainer:
 
     def save_metrics(self, metrics):
         """Save training metrics to a CSV file."""
-        keys, vals = list(metrics.keys()), list(metrics.values())
-        n = len(metrics) + 2  # number of cols
-        s = "" if self.csv.exists() else (("%s," * n % tuple(["epoch", "time"] + keys)).rstrip(",") + "\n")  # header
         t = time.time() - self.train_time_start
-        with open(self.csv, "a", encoding="utf-8") as f:
-            f.write(s + ("%.6g," * n % tuple([self.epoch + 1, t] + vals)).rstrip(",") + "\n")
+        row = {
+            "run_id": self.run_id,
+            "framework": "yolo",
+            "experiment": self.run_id,
+            "model": str(getattr(self.args, "model", "")),
+            "dataset": str(getattr(self.args, "data", "")),
+            "record_type": "train",
+            "epoch": self.epoch + 1,
+            "time": t,
+            **metrics,
+        }
+        append_csv_rows(self.csv, [row])
 
     def plot_metrics(self):
         """Plot and display metrics visually."""

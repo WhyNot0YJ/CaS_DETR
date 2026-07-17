@@ -11,7 +11,7 @@ HybridEncoder:
   cass_focal_alpha: 2.0
   cass_focal_beta: 4.0
   caip_reduction_ratio: 4
-  caip_complexity_alpha: 0.3
+  caip_complexity_alpha: 1.0
 
 DFINETransformer:
   use_moe: True

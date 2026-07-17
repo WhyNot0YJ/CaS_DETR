@@ -29,6 +29,7 @@ if str(_yolo_dir) not in sys.path:
     sys.path.insert(0, str(_yolo_dir))
 
 from base_yolo_trainer import DEFAULT_TRAIN_BATCH, BaseYOLOTrainer
+from common.result_paths import append_csv_rows, result_csv
 from fasterrcnn_dataset import (
     YOLOFormatDetectionDataset,
     RandomHorizontalFlipDetection,
@@ -196,7 +197,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
 
         best_val_loss = float("inf")
         results_rows: List[Dict[str, Any]] = []
-        csv_path = self.log_dir / "results.csv"
+        csv_path = result_csv("results")
         if (
             resume_ckpt is not None
             and csv_path.exists()
@@ -204,6 +205,8 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             try:
                 import pandas as pd
                 prev = pd.read_csv(csv_path)
+                if "run_id" in prev.columns:
+                    prev = prev[prev["run_id"].astype(str) == self.log_dir.name]
                 results_rows = prev.to_dict("records")
                 if results_rows:
                     best_val_loss = float(
@@ -373,8 +376,22 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         if not rows:
             return
         df = pd.DataFrame(rows)
-        csv_path = self.log_dir / "results.csv"
-        df.to_csv(csv_path, index=False)
+        csv_path = result_csv("results")
+        append_csv_rows(
+            csv_path,
+            [
+                {
+                    "run_id": self.log_dir.name,
+                    "framework": "fasterrcnn",
+                    "experiment": self.experiment_name,
+                    "model": self.model_config.get("model_name", "fasterrcnn"),
+                    "dataset": Path(self.data_config.get("data_yaml", "unknown")).stem,
+                    "record_type": "train",
+                    **row,
+                }
+                for row in rows
+            ],
+        )
         self.logger.info(f"✓ 训练曲线数据: {csv_path}")
 
     def _log_fasterrcnn_resume(

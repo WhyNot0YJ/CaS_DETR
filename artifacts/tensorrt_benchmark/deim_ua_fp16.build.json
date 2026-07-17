@@ -1,0 +1,11 @@
+{
+  "onnx": "/root/autodl-tmp/CaS_DETR/artifacts/tensorrt_benchmark/deim_ua.onnx",
+  "engine": "/root/autodl-tmp/CaS_DETR/artifacts/tensorrt_benchmark/deim_ua_fp16.engine",
+  "precision": "fp16",
+  "workspace_mib": 4096,
+  "build_seconds": 239.7305235862732,
+  "tensorrt": "10.13.3.9",
+  "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.35",
+  "gpu": "NVIDIA GeForce RTX 4060",
+  "driver": "581.29"
+}

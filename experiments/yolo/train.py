@@ -43,7 +43,9 @@ def default_config_for_version(version: str) -> Path:
     return Path(f"configs/yolov{version}n_dairv2x.yaml")
 
 
-def build_trainer(version: str, config: dict, config_path: Optional[str] = None, class_names: Optional[List[str]] = None):
+def build_trainer(version: str, config: dict, config_path: Optional[str] = None,
+                  class_names: Optional[List[str]] = None,
+                  resume_checkpoint: Optional[str] = None):
     from base_yolo_trainer import BaseYOLOTrainer
 
     class UnifiedYOLOTrainer(BaseYOLOTrainer):
@@ -51,7 +53,10 @@ def build_trainer(version: str, config: dict, config_path: Optional[str] = None,
 
         def __init__(self, trainer_version: str, trainer_config: dict, trainer_config_path: Optional[str] = None):
             self.VERSION = normalize_version(trainer_version)
-            super().__init__(trainer_config, trainer_config_path, class_names or DEFAULT_CLASS_NAMES)
+            super().__init__(
+                trainer_config, trainer_config_path, class_names or DEFAULT_CLASS_NAMES,
+                resume_checkpoint=resume_checkpoint,
+            )
 
         def create_model(self):
             from ultralytics import YOLO
@@ -123,6 +128,9 @@ def main():
         config.setdefault("training", {})["seed"] = args.seed
         print(f"🎲 覆盖 seed: {args.seed}")
 
+    from ultralytics import settings
+
+    settings.update({"tensorboard": True})
     trainer = build_trainer(
         version=version,
         config=config,
@@ -133,6 +141,7 @@ def main():
         resume_checkpoint=args.resume_from_checkpoint,
         epochs_override=args.epochs,
     )
+    trainer.run_tensorrt_benchmark()
 
 
 if __name__ == "__main__":

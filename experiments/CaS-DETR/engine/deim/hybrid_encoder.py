@@ -248,7 +248,8 @@ class TransformerEncoderLayer(nn.Module):
         if self.normalize_before:
             src = self.norm1(src)
         q = k = self.with_pos_embed(src, pos_embed)
-        src, _ = self.self_attn(q, k, value=src, attn_mask=src_mask)
+        src, _ = self.self_attn(
+            q, k, value=src, key_padding_mask=src_mask, need_weights=False)
 
         src = residual + self.dropout1(src)
         if not self.normalize_before:
@@ -499,23 +500,27 @@ class HybridEncoder(nn.Module):
     def _gather_pos_embed(pos_embed_full: torch.Tensor,
                           kept_indices: Optional[torch.Tensor],
                           batch_size: int,
-                          total_tokens: int) -> torch.Tensor:
+                          total_tokens: int,
+                          valid_token_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         if kept_indices is None:
             return pos_embed_full.unsqueeze(0).expand(batch_size, -1, -1)
 
         kept_indices = HybridEncoder._normalize_kept_indices(kept_indices, batch_size)
         valid_mask = (kept_indices >= 0) & (kept_indices < total_tokens)
+        if valid_token_mask is not None:
+            valid_mask = valid_mask & valid_token_mask
         kept_indices_clean = kept_indices.clamp(0, total_tokens - 1)
         pos_embed_full_batch = pos_embed_full.unsqueeze(0).expand(batch_size, -1, -1)
-        batch_indices = torch.arange(batch_size, device=kept_indices.device).unsqueeze(1).expand_as(kept_indices)
-        pos_embed = pos_embed_full_batch[batch_indices, kept_indices_clean]
+        gather_index = kept_indices_clean.unsqueeze(-1).expand(-1, -1, pos_embed_full.shape[-1])
+        pos_embed = torch.gather(pos_embed_full_batch, dim=1, index=gather_index)
         return pos_embed * valid_mask.unsqueeze(-1)
 
     @staticmethod
     def _scatter_tokens_to_grid(memory: torch.Tensor,
                                 kept_indices: Optional[torch.Tensor],
                                 total_tokens: int,
-                                hidden_dim: int) -> torch.Tensor:
+                                hidden_dim: int,
+                                valid_token_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         batch_size = memory.shape[0]
         memory_full = torch.zeros(
             batch_size, total_tokens, hidden_dim,
@@ -529,12 +534,17 @@ class HybridEncoder(nn.Module):
 
         kept_indices = HybridEncoder._normalize_kept_indices(kept_indices, batch_size)
         valid_mask = (kept_indices >= 0) & (kept_indices < total_tokens)
+        if valid_token_mask is not None:
+            valid_mask = valid_mask & valid_token_mask
         kept_indices_clean = kept_indices.clamp(0, total_tokens - 1)
         batch_offsets = torch.arange(batch_size, device=memory.device).view(batch_size, 1) * total_tokens
         global_indices = (kept_indices_clean + batch_offsets).reshape(-1)
         valid_mask_flat = valid_mask.reshape(-1)
         valid_indices = global_indices[valid_mask_flat]
         valid_features = memory.reshape(-1, hidden_dim)[valid_mask_flat]
+        if torch.onnx.is_in_onnx_export():
+            scatter_index = kept_indices_clean.unsqueeze(-1).expand(-1, -1, hidden_dim)
+            return memory_full.scatter(1, scatter_index, memory * valid_mask.unsqueeze(-1))
         memory_full.reshape(-1, hidden_dim).index_copy_(0, valid_indices, valid_features)
         return memory_full
 
@@ -568,6 +578,7 @@ class HybridEncoder(nn.Module):
 
                 prune_info = {'pruning_ratio': 0.0, 'token_importance_scores': None}
                 kept_indices = None
+                valid_token_mask = None
                 external_scores = None
                 dynamic_keep_ratio = None
 
@@ -583,19 +594,20 @@ class HybridEncoder(nn.Module):
                     else:
                         if self.caip_static_keep_eval and not self.training:
                             # Eval: fixed keep fraction = token_keep_ratio; CAIP scores still rank tokens.
-                            dynamic_keep_ratio = torch.full(
-                                (src_flatten.shape[0],),
-                                base_ratio,
-                                device=src_flatten.device,
-                                dtype=torch.float32,
-                            )
+                            dynamic_keep_ratio = base_ratio
                         else:
                             # Complexity proxy: per-image mean token confidence.
                             # Detach to avoid trivially inflating scores to disable pruning.
                             mean_conf = torch.sigmoid(external_scores.detach()).mean(dim=1)  # [B]
                             dynamic_keep_ratio = base_ratio + (1.0 - base_ratio) * mean_conf * self.caip_complexity_alpha
                             dynamic_keep_ratio = dynamic_keep_ratio.clamp(min=base_ratio, max=1.0)
-                        encoder_info['dynamic_keep_ratio'] = dynamic_keep_ratio
+                        if isinstance(dynamic_keep_ratio, torch.Tensor):
+                            encoder_info['dynamic_keep_ratio'] = dynamic_keep_ratio
+                        else:
+                            encoder_info['dynamic_keep_ratio'] = torch.full(
+                                (src_flatten.shape[0],), dynamic_keep_ratio,
+                                device=src_flatten.device, dtype=torch.float32,
+                            )
 
                 if self.shared_token_pruner is not None:
                     src_flatten, kept_indices, prune_info = self.shared_token_pruner(
@@ -609,12 +621,19 @@ class HybridEncoder(nn.Module):
                 encoder_info['token_pruning_ratios'].append(prune_info.get('pruning_ratio', 0.0))
                 encoder_info['importance_scores_list'].append(prune_info.get('token_importance_scores'))
                 encoder_info['feat_shapes_list'].append((h, w))
+                valid_token_mask = prune_info.get('valid_token_mask')
 
                 pos_embed_pruned = self._gather_pos_embed(
-                    pos_embed_full, kept_indices, src_flatten.shape[0], total_tokens
+                    pos_embed_full, kept_indices, src_flatten.shape[0], total_tokens,
+                    valid_token_mask=valid_token_mask,
                 )
-                memory :torch.Tensor = self.encoder[i](src_flatten, pos_embed=pos_embed_pruned)
-                memory = self._scatter_tokens_to_grid(memory, kept_indices, total_tokens, self.hidden_dim)
+                padding_mask = None if valid_token_mask is None else ~valid_token_mask
+                memory :torch.Tensor = self.encoder[i](
+                    src_flatten, src_mask=padding_mask, pos_embed=pos_embed_pruned)
+                memory = self._scatter_tokens_to_grid(
+                    memory, kept_indices, total_tokens, self.hidden_dim,
+                    valid_token_mask=valid_token_mask,
+                )
                 proj_feats[enc_ind] = memory.permute(0, 2, 1).reshape(-1, self.hidden_dim, h, w).contiguous()
 
         # broadcasting and fusion

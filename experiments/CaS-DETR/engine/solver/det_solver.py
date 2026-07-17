@@ -129,7 +129,7 @@ class DetSolver(BaseSolver):
 
             self.last_epoch += 1
 
-            if self.output_dir and epoch < self.train_dataloader.collate_fn.stop_epoch:
+            if self.output_dir:
                 checkpoint_paths = [self.output_dir / 'last.pth']
                 # extra checkpoint before LR drop and every 100 epochs
                 if (epoch + 1) % args.checkpoint_freq == 0:
@@ -168,6 +168,7 @@ class DetSolver(BaseSolver):
                             dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg2.pth')
                         else:
                             dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg1.pth')
+                        dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
 
                 best_stat_print[k] = max(best_stat[k], top1)
                 print(f'best_stat: {best_stat_print}')  # global best
@@ -177,9 +178,11 @@ class DetSolver(BaseSolver):
                         if test_stats[k][0] > top1:
                             top1 = test_stats[k][0]
                             dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg2.pth')
+                            dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
                     else:
                         top1 = max(test_stats[k][0], top1)
                         dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg1.pth')
+                        dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
 
                 elif epoch >= self.train_dataloader.collate_fn.stop_epoch:
                     best_stat = {'epoch': -1, }

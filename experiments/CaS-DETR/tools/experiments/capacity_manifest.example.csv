@@ -1,0 +1,5 @@
+capacity,predictions,eval_metrics,log_file,router_stats
+0.5x,/path/to/cap05x/predictions_val.json,/path/to/cap05x/eval_metrics.csv,/path/to/cap05x/log.txt,/path/to/cap05x/router_stats.json
+1x,/path/to/cap1x/predictions_val.json,/path/to/cap1x/eval_metrics.csv,/path/to/cap1x/log.txt,/path/to/cap1x/router_stats.json
+2x,/path/to/cap2x/predictions_val.json,/path/to/cap2x/eval_metrics.csv,/path/to/cap2x/log.txt,/path/to/cap2x/router_stats.json
+4x,/path/to/cap4x/predictions_val.json,/path/to/cap4x/eval_metrics.csv,/path/to/cap4x/log.txt,/path/to/cap4x/router_stats.json

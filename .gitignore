@@ -44,13 +44,6 @@ venv.bak/
 *.swo
 *~
 
-# Agents / AI assistants
-.cursor/
-.claude/
-.agents/
-.ignore
-AGENTS.md
-
 # OS
 .DS_Store
 .DS_Store?
@@ -187,5 +180,8 @@ experiments/**/dataset/
 /experiments/CaS-DETR/**/*.html
 /experiments/DEIM/**/*.zip
 /experiments/DEIM/**/*.html
+# TensorRT / export sidecar outputs
+**/*.build.json
+**/*.onnx.data
 /experiments/DQM-DETR/**/*.zip
 /experiments/DQM-DETR/**/*.html

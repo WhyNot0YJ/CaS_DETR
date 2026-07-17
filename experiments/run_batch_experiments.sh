@@ -3,6 +3,12 @@
 # 解决 32G 环境下 Dataloader 多进程与 OpenMP 线程池冲突导致的 libgomp 报错
 export OMP_NUM_THREADS=1
 
+# TensorRT 收尾 benchmark 默认开启；可设 TRT_BENCHMARK=0 关闭。
+TRT_BENCHMARK="${TRT_BENCHMARK:-1}"
+TRT_WARMUP="${TRT_WARMUP:-100}"
+TRT_ITERATIONS="${TRT_ITERATIONS:-1000}"
+TRTEXEC="${TRTEXEC:-trtexec}"
+
 ################################################################################
 # 批量实验运行脚本 - 方案2：鲁棒批量运行
 # 
@@ -31,7 +37,8 @@ export OMP_NUM_THREADS=1
 #   ./run_batch_experiments.sh --cas_pack_moe4_base03_a10      # 打包：moe4 base03_a10 双数据集 + moe4_only + cass_only_caip base03_a10（不含 keep*_fixed）
 #   ./run_batch_experiments.sh --cas_fixed_keep_ratio          # 仅 DAIR：moe4 base03_a10 + keep0.3/0.7 固定（与 pack 分开跑）
 #   ./run_batch_experiments.sh --cas_moe4_base03_a10_fixed_keep  # 同上别名
-#   ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 总参数量扫描：固定 num_experts=4/top_k=2，扫 cap05x/cap1x/cap2x（dim_ff=128/256/512，DAIR-V2X；cap4x 已跑过，不包含）
+#   ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 总参数量扫描：固定 experts=4/top_k=2，扫 0.5x/1x/2x/4x（DAIR-V2X）
+#   ./run_batch_experiments.sh --cas_moe_expert_scan           # MoE 专家数扫描：固定 top_k=2/dim_ff=128，扫 experts=3/4/6（DAIR-V2X）
 #   ./run_batch_experiments.sh --yolov5                        # 只运行YOLOv5实验
 #   ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8实验
 #   ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12实验
@@ -110,7 +117,10 @@ TOTAL_PLANNED_RUNS=0
 
 # 选择可用的 Python 解释器
 PYTHON_BIN=""
-if command -v python >/dev/null 2>&1; then
+PROJECT_TRT_ENV="$SCRIPT_DIR/../../cas_trt_env/bin/python"
+if [ -x "$PROJECT_TRT_ENV" ]; then
+    PYTHON_BIN="$PROJECT_TRT_ENV"
+elif command -v python >/dev/null 2>&1; then
     PYTHON_BIN="python"
 elif command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN="python3"
@@ -134,6 +144,26 @@ log_error() {
 
 log_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+run_trt_benchmark_for_eval() {
+    local framework="$1" config="$2" output_dir="$3" model="$4"
+    local images="/root/autodl-fs/datasets/DAIR-V2X/image"
+    [[ "$config" == *uadetrac* ]] && images="/root/autodl-fs/datasets/UA-DETRAC_COCO/val"
+    [ "$TRT_BENCHMARK" = "0" ] && return 0
+    local checkpoint="$output_dir/best.pth"
+    [ -f "$checkpoint" ] || checkpoint="$output_dir/last.pth"
+    if [ ! -f "$checkpoint" ]; then
+        log_warning "TensorRT benchmark 跳过（缺少 checkpoint）: $output_dir"
+        return 0
+    fi
+    log_info "运行 TensorRT benchmark（FPS 将写入主表最后一列）: $model"
+    "$PYTHON_BIN" "$SCRIPT_DIR/CaS-DETR/tools/benchmark/benchmark_experiment_trt.py" \
+        --framework "$framework" --config "$SCRIPT_DIR/$config" \
+        --checkpoint "$SCRIPT_DIR/$checkpoint" --output-dir "$SCRIPT_DIR/$output_dir" \
+        --model "$model" --images "$images" \
+        --trtexec "$TRTEXEC" --warmup "$TRT_WARMUP" --iterations "$TRT_ITERATIONS" \
+        || log_warning "TensorRT benchmark 失败（不影响训练结果）: $model"
 }
 
 # 根据路径与 NAME_TO_PATH 键判断是否属于 dairv2x / uadetrac；want_* 为 true 时表示当前筛选需要该侧
@@ -289,12 +319,21 @@ declare -a CAS_FIXED_KEEP_RATIO_EXPERIMENTS=(
 # MoE 总参数量扫描：仅扫 dim_feedforward（每个专家 FFN 中间层维度）
 # 倍数定义：MoE 层总参数 / 普通单 FFN 参数 = num_experts * dim_feedforward / 1024
 # 单一变量对照：num_experts=4, moe_top_k=2 不变；其余 CAS/CAIP/CASS 与 base03_a10 基线一致
-# cap4x（dim_ff=1024）= 当前默认，已跑过，不重复跑；与 cap05x/cap1x/cap2x 结果合并画曲线
+# 按统一训练协议重新运行 cap05x/cap1x/cap2x/cap4x，避免混用历史 checkpoint
 # 用于回答：精度是否与 MoE 总专家容量相关？降到与稠密 FFN 同参、甚至 1/2 同参时是否仍有增益？
 declare -a CAS_MOE_CAPACITY_SCAN_EXPERIMENTS=(
     "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
     "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
     "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+)
+
+# MoE 专家数扫描：固定每个专家宽度和每 token 激活的专家数，只改变专家池规模
+# moe4 dim128 与容量扫描的 cap05x 是同一配置；两个入口组合时只运行一次
+declare -a CAS_MOE_EXPERT_SCAN_EXPERIMENTS=(
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe3_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe6_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
 )
 
 # 快速打包：base03_a10 moe4 主线（不含 keep*_fixed；固定 keep 见 CAS_FIXED_KEEP_RATIO_EXPERIMENTS）
@@ -824,6 +863,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
     local has_cas_pack_moe4_base03_a10=false
     local has_cas_fixed_keep_ratio=false
     local has_cas_moe_capacity_scan=false
+    local has_cas_moe_expert_scan=false
     local has_yolov5=false
     local has_yolov8=false
     local has_yolov12=false
@@ -878,6 +918,9 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
             --cas_moe_capacity_scan|--cas-moe-capacity-scan|--cas_moe_ffn_scan|--cas-moe-ffn-scan)
                 has_cas_moe_capacity_scan=true
                 ;;
+            --cas_moe_expert_scan|--cas-moe-expert-scan|--cas_moe_num_experts_scan|--cas-moe-num-experts-scan)
+                has_cas_moe_expert_scan=true
+                ;;
             --yolov5)
                 has_yolov5=true
                 ;;
@@ -912,7 +955,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_cas_moe_expert_scan" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
@@ -928,6 +971,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         [ "$has_cas_pack_moe4_base03_a10" = true ] && selected_types+=("CaS_DETR_PACK_moe4_base03_a10")
         [ "$has_cas_fixed_keep_ratio" = true ] && selected_types+=("CaS_DETR_FIXED_keep_ratio")
         [ "$has_cas_moe_capacity_scan" = true ] && selected_types+=("CaS_DETR_MOE_CAPACITY_SCAN")
+        [ "$has_cas_moe_expert_scan" = true ] && selected_types+=("CaS_DETR_MOE_EXPERT_SCAN")
         [ "$has_yolov5" = true ] && selected_types+=("YOLOv5")
         [ "$has_yolov8" = true ] && selected_types+=("YOLOv8")
         [ "$has_yolov12" = true ] && selected_types+=("YOLOv12")
@@ -1055,6 +1099,18 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         if [ "$has_cas_moe_capacity_scan" = true ]; then
             local _p
             for _p in "${CAS_MOE_CAPACITY_SCAN_EXPERIMENTS[@]}"; do
+                if filter_config "$_p"; then
+                    CONFIGS_TO_RUN+=("$_p")
+                fi
+            done
+        fi
+
+        if [ "$has_cas_moe_expert_scan" = true ]; then
+            local _p
+            for _p in "${CAS_MOE_EXPERT_SCAN_EXPERIMENTS[@]}"; do
+                if [ "$has_cas_moe_capacity_scan" = true ] && [[ "$_p" == *"moe4_cap05x"* ]]; then
+                    continue
+                fi
                 if filter_config "$_p"; then
                     CONFIGS_TO_RUN+=("$_p")
                 fi
@@ -1254,7 +1310,8 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         echo "  ./run_batch_experiments.sh --cas_caip_base05               # 只运行 CAIP 消融：r_base=0.5, alpha=1.0（4 个配置，DAIR+UA）"
         echo "  ./run_batch_experiments.sh --cas_pack_moe4_base03_a10      # moe4 base03_a10 打包（不含 keep 固定分支）"
         echo "  ./run_batch_experiments.sh --cas_fixed_keep_ratio          # 仅 DAIR：moe4 base03_a10 keep0.3、0.7 固定（独立入口）"
-        echo "  ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 总参数量扫描：cap05x/cap1x/cap2x（dim_ff=128/256/512，仅 DAIR；cap4x 已跑）"
+        echo "  ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 容量扫描：0.5x/1x/2x/4x（experts=4、top_k=2，仅 DAIR）"
+        echo "  ./run_batch_experiments.sh --cas_moe_expert_scan           # MoE 专家数扫描：3/4/6（dim_ff=128、top_k=2，仅 DAIR）"
         echo "  ./run_batch_experiments.sh --yolov5                        # 只运行YOLOv5"
         echo "  ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8"
         echo "  ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12"
@@ -1391,6 +1448,11 @@ run_single_experiment() {
         local duration=$((end_time - start_time))
         local duration_formatted=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
         if [ $exit_code -eq 0 ]; then
+            run_trt_benchmark_for_eval \
+                "rtdetr" \
+                "RT-DETR/rtdetrv2_pytorch/outputs/${out_tag}/config.yml" \
+                "RT-DETR/rtdetrv2_pytorch/outputs/${out_tag}" \
+                "${exp_name}@${rtdetr_adapter_dataset}"
             log_success "✓ RT-DETRv2 完成: ${exp_name}@${rtdetr_adapter_dataset} (耗时: $duration_formatted)"
             SUCCESSFUL_EXPERIMENTS=$((SUCCESSFUL_EXPERIMENTS + 1))
         else
@@ -1509,6 +1571,11 @@ run_single_experiment() {
                 --config "$config_path" \
                 --model-name "$exp_name" \
                 --device cuda 2>&1 || log_warning "CaS 评估失败（不影响训练结果）"
+            local model_output_rel
+            model_output_rel=$("$PYTHON_BIN" -c 'import sys,yaml; print((yaml.safe_load(open(sys.argv[1])) or {}).get("output_dir", ""))' "$yml_rel")
+            if [ -n "$model_output_rel" ]; then
+                run_trt_benchmark_for_eval "$fw_flag" "$config_path" "$WORK_DIR/${model_output_rel#./}" "$exp_name"
+            fi
             cd "$WORK_DIR"
         fi
 
@@ -1534,8 +1601,41 @@ run_single_experiment() {
         [[ "$exp_name" == *uadetrac* ]] && FRCNN_DS="uadetrac"
         "$PYTHON_BIN" train_fasterrcnn.py --config "../$config_path" --dataset "$FRCNN_DS"
     elif [ -n "$YOLO_VERSION" ] && [ "$TEST_MODE" = true ]; then
+        if [ "${SKIP_COMPLETED_YOLO_RUNS:-1}" = "1" ]; then
+            local yolo_log_root="$SCRIPT_DIR/yolo/logs"
+            local yolo_dataset_dir="$yolo_log_root/dairv2x"
+            [[ "$config_path" == *uadetrac* ]] && yolo_dataset_dir="$yolo_log_root/uadetrac"
+            # Historical YOLO run directories use the model-only prefix
+            # (e.g. yolo_yolov5m_<timestamp>), while queue keys include the
+            # dataset suffix (yolov5m_dairv2x). Match the stable model name.
+            local yolo_prefix="yolo_${exp_name%%_*}_"
+            local completed_run
+            completed_run=$(find "$yolo_dataset_dir" -maxdepth 1 -type d -name "${yolo_prefix}*" 2>/dev/null | while read -r d; do
+                [ -f "$d/args.yaml" ] && [ -f "$d/config.yaml" ] && [ -d "$d/weights" ] && find "$d/weights" -mindepth 1 -maxdepth 1 | read -r _ && printf '%s\n' "$d" && break
+            done)
+            if [ -n "$completed_run" ]; then
+                log_warning "跳过已完成的 YOLO 实验: $exp_display -> $completed_run"
+                SKIPPED_EXPERIMENTS=$((SKIPPED_EXPERIMENTS + 1))
+                return 0
+            fi
+        fi
         "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" --epochs 2
     elif [ -n "$YOLO_VERSION" ]; then
+        if [ "${SKIP_COMPLETED_YOLO_RUNS:-1}" = "1" ]; then
+            local yolo_log_root="$SCRIPT_DIR/yolo/logs"
+            local yolo_dataset_dir="$yolo_log_root/dairv2x"
+            [[ "$config_path" == *uadetrac* ]] && yolo_dataset_dir="$yolo_log_root/uadetrac"
+            local yolo_prefix="yolo_${exp_name%%_*}_"
+            local completed_run
+            completed_run=$(find "$yolo_dataset_dir" -maxdepth 1 -type d -name "${yolo_prefix}*" 2>/dev/null | while read -r d; do
+                [ -f "$d/args.yaml" ] && [ -f "$d/config.yaml" ] && [ -d "$d/weights" ] && find "$d/weights" -mindepth 1 -maxdepth 1 | read -r _ && printf '%s\n' "$d" && break
+            done)
+            if [ -n "$completed_run" ]; then
+                log_warning "跳过已完成的 YOLO 实验: $exp_display -> $completed_run"
+                SKIPPED_EXPERIMENTS=$((SKIPPED_EXPERIMENTS + 1))
+                return 0
+            fi
+        fi
         "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path"
     elif [ "$TEST_MODE" = true ]; then
         "$PYTHON_BIN" train.py --config "../$config_path" --epochs 2
@@ -1589,6 +1689,8 @@ generate_report() {
     echo -e "${BLUE}      - DQM-DETR 消融日志: DQM-DETR/outputs/ablation/${NC}"
     echo -e "${BLUE}      - DQM-DETR 主实验日志: DQM-DETR/outputs/main/${NC}"
     echo -e "${BLUE}      - YOLO统一日志: yolo/logs/${NC}"
+    echo -e "${BLUE}      - TensorRT 统一总表: reports/benchmark.csv${NC}"
+    echo -e "${BLUE}      - 精度+速度总表: reports/eval_metrics.csv${NC}"
     echo -e "${BLUE}      - DEIM日志: DEIM/outputs/${NC}"
     echo -e "${BLUE}      - D-FINE日志: D-FINE/output/${NC}"
     echo -e "${BLUE}      - Deformable-DETR日志: deformable-detr/work_dirs/${NC}"

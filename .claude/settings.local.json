@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/root/autodl-fs/datasets/**)",
+      "Read(//c/root/autodl-fs//**)",
+      "Read(//c/root/autodl-fs/**)",
+      "Bash(\"/c/Users/romainyu/AppData/Local/Programs/Python/Python312/python.exe\" -m pip show calflops)",
+      "Bash(\"/c/Users/romainyu/AppData/Local/Programs/Python/Python312/python.exe\" -m pip show transformers)",
+      "Bash(\"/c/Users/romainyu/AppData/Local/Programs/Python/Python312/python.exe\" -m pip uninstall torch torchvision -y)",
+      "Bash(python -m py_compile engine/solver/det_solver.py)"
+    ]
+  }
+}

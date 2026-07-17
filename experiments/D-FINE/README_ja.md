@@ -368,7 +368,7 @@ export model=l  # n s m l x
 
 2. トレーニング
 ```shell
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/dfine_hgnetv2_${model}_coco.yml --use-amp --seed=0
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/dfine_hgnetv2_${model}_coco.yml --seed=0
 ```
 
 <!-- <summary>2. テスト </summary> -->
@@ -380,7 +380,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 trai
 <!-- <summary>3. 微調整 </summary> -->
 4. 微調整
 ```shell
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/dfine_hgnetv2_${model}_coco.yml --use-amp --seed=0 -t model.pth
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/dfine_hgnetv2_${model}_coco.yml --seed=0 -t model.pth
 ```
 </details>
 
@@ -395,12 +395,12 @@ export model=l  # n s m l x
 
 2. Objects365でトレーニング
 ```shell
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/objects365/dfine_hgnetv2_${model}_obj365.yml --use-amp --seed=0
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/objects365/dfine_hgnetv2_${model}_obj365.yml --seed=0
 ```
 
 3. COCO2017で微調整
 ```shell
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/objects365/dfine_hgnetv2_${model}_obj2coco.yml --use-amp --seed=0 -t model.pth
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/objects365/dfine_hgnetv2_${model}_obj2coco.yml --seed=0 -t model.pth
 ```
 
 <!-- <summary>2. テスト </summary> -->
@@ -421,7 +421,7 @@ export model=l  # n s m l x
 
 2. カスタムデータセットでトレーニング
 ```shell
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/custom/dfine_hgnetv2_${model}_custom.yml --use-amp --seed=0
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/custom/dfine_hgnetv2_${model}_custom.yml --seed=0
 ```
 <!-- <summary>2. テスト </summary> -->
 3. テスト
@@ -431,7 +431,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 trai
 
 4. カスタムデータセットで微調整
 ```shell
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/custom/objects365/dfine_hgnetv2_${model}_obj2custom.yml --use-amp --seed=0 -t model.pth
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/custom/objects365/dfine_hgnetv2_${model}_obj2custom.yml --seed=0 -t model.pth
 ```
 
 5. **[オプション]** クラスマッピングを変更します：
@@ -447,7 +447,7 @@ https://github.com/Peterande/D-FINE/blob/352a94ece291e26e1957df81277bef00fe88a8e
 新しいトレーニングコマンド：
 
 ```shell
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/custom/dfine_hgnetv2_${model}_custom.yml --use-amp --seed=0 -t model.pth
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --master_port=7777 --nproc_per_node=4 train.py -c configs/dfine/custom/dfine_hgnetv2_${model}_custom.yml --seed=0 -t model.pth
 ```
 
 ただし、クラスマッピングを変更したくない場合、事前トレーニング済みのObjects365の重みは変更なしでそのまま使用できます。クラスマッピングの変更はオプションであり、特定のタスクに対して収束を早める可能性があります。

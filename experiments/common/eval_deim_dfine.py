@@ -34,12 +34,14 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 from common.det_eval_metrics import (
     coco_ap_at_iou50_all,
     coco_area_ap_at_iou50,
+    canonical_category_metric_name,
     compute_weather_subset_metrics,
     extract_per_category_ap_from_coco_eval,
     run_coco_bbox_eval,
     write_eval_csv,
 )
 from common.detr_eval_utils import log_detr_eval_summary, run_detr_benchmark
+from common.result_paths import result_csv, run_metadata
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +49,79 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 LOG = logging.getLogger(__name__)
+
+
+class RouterStatsCollector:
+    """Accumulate per-layer MoE routing and keep-ratio statistics."""
+
+    def __init__(self):
+        self.layers: Dict[str, Dict[str, Any]] = {}
+        self.keep_ratio_sum = 0.0
+        self.keep_ratio_count = 0
+
+    def update(self, model, outputs):
+        encoder_info = outputs.get("encoder_info", {}) if isinstance(outputs, dict) else {}
+        ratio = encoder_info.get("dynamic_keep_ratio")
+        if isinstance(ratio, torch.Tensor):
+            self.keep_ratio_sum += float(ratio.detach().float().sum().item())
+            self.keep_ratio_count += int(ratio.numel())
+
+        for name, module in _unwrap_module(model).named_modules():
+            logits_cache = getattr(module, "router_logits_cache", None)
+            indices_cache = getattr(module, "expert_indices_cache", None)
+            if not logits_cache or not indices_cache:
+                continue
+            try:
+                num_experts = int(module.num_experts)
+                state = self.layers.setdefault(name, {
+                    "num_experts": num_experts,
+                    "top_k": int(module.top_k),
+                    "token_count": 0,
+                    "prob_sum": [0.0] * num_experts,
+                    "dispatch_count": [0] * num_experts,
+                    "entropy_sum": 0.0,
+                })
+                for logits, indices in zip(logits_cache, indices_cache):
+                    probs = torch.softmax(logits.detach().float(), dim=-1)
+                    state["token_count"] += int(probs.shape[0])
+                    prob_sum = probs.sum(dim=0).cpu().tolist()
+                    state["prob_sum"] = [a + float(b) for a, b in zip(state["prob_sum"], prob_sum)]
+                    counts = torch.bincount(indices.detach().reshape(-1), minlength=num_experts).cpu().tolist()
+                    state["dispatch_count"] = [a + int(b) for a, b in zip(state["dispatch_count"], counts)]
+                    entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=-1)
+                    state["entropy_sum"] += float(entropy.sum().item())
+            finally:
+                # Router diagnostics are per-forward data. Do not retain the
+                # previous batch's GPU tensors while evaluating the next one.
+                reset = getattr(module, "reset_cache", None)
+                if callable(reset):
+                    reset()
+
+    def to_dict(self):
+        layers = []
+        for name, state in sorted(self.layers.items()):
+            tokens = max(1, int(state["token_count"]))
+            dispatches = max(1, sum(state["dispatch_count"]))
+            mean_prob = [value / tokens for value in state["prob_sum"]]
+            usage = [value / dispatches for value in state["dispatch_count"]]
+            balance = state["num_experts"] * sum(a * b for a, b in zip(usage, mean_prob))
+            layers.append({
+                "layer": name,
+                "num_experts": state["num_experts"],
+                "top_k": state["top_k"],
+                "token_count": state["token_count"],
+                "expert_usage": usage,
+                "router_probability": mean_prob,
+                "router_entropy": state["entropy_sum"] / tokens,
+                "expert_load": state["dispatch_count"],
+                "load_balance_loss": balance,
+            })
+        return {
+            "average_keep_ratio": (
+                self.keep_ratio_sum / self.keep_ratio_count if self.keep_ratio_count else None
+            ),
+            "layers": layers,
+        }
 
 def _unwrap_module(m: Any) -> Any:
     return m.module if hasattr(m, "module") else m
@@ -262,6 +337,7 @@ def collect_predictions(
     *,
     remap_mscoco_category: bool = False,
     label2category=None,
+    router_stats=None,
 ) -> List[Dict]:
     """Run inference and return predictions in COCO detection format."""
     model.eval()
@@ -275,6 +351,8 @@ def collect_predictions(
         ]
 
         outputs = model(samples)
+        if router_stats is not None:
+            router_stats.update(model, outputs)
         orig_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessor(outputs, orig_sizes)
 
@@ -367,9 +445,9 @@ def compute_cas_metrics(
 
     per50, per5095 = extract_per_category_ap_from_coco_eval(ce, categories)
     for name, v in per50.items():
-        metrics[f"AP50_{name}"] = v
+        metrics[f"AP50_{canonical_category_metric_name(name)}"] = v
     for name, v in per5095.items():
-        metrics[f"AP5095_{name}"] = v
+        metrics[f"AP5095_{canonical_category_metric_name(name)}"] = v
 
     weather_metrics = compute_weather_subset_metrics(coco_gt, predictions)
     metrics.update(weather_metrics)
@@ -506,7 +584,7 @@ def _maybe_run_cross_domain_csv_row(
             pass
 
     log_detr_eval_summary(LOG, "cross_domain_dawn", metrics, bench_dict)
-    dawn_csv_path = csv_path.with_name(f"{csv_path.stem}_dawn{csv_path.suffix}")
+    dawn_csv_path = csv_path
     write_eval_csv(
         dawn_csv_path,
         model=model_name,
@@ -514,7 +592,7 @@ def _maybe_run_cross_domain_csv_row(
         eval_split="cross_domain_dawn",
         metrics=metrics,
         class_names=class_names,
-        append=dawn_csv_path.exists(),
+        append=True,
         benchmark=bench_dict,
         weather_buckets=weather_buckets or None,
     )
@@ -548,7 +626,7 @@ def main():
     parser.add_argument("--dataset-name", default=None,
                         help="Dataset display name for CSV (auto-detect from config paths)")
     parser.add_argument("--output-csv", default=None,
-                        help="CSV path (default: <output_dir>/eval_metrics.csv)")
+                        help="CSV path (default: experiments/reports/eval_metrics.csv)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--splits", default="val,test",
                         help="Comma-separated eval splits to run (default: val,test)")
@@ -567,6 +645,16 @@ def main():
         default=None,
         type=int,
         help="Encoder epoch for epoch-dependent behaviors (default: checkpoint last_epoch).",
+    )
+    parser.add_argument(
+        "--predictions-dir",
+        default=None,
+        help="Directory for predictions_<split>.json (default: output_dir).",
+    )
+    parser.add_argument(
+        "--router-stats",
+        default=None,
+        help="Optional JSON path for per-layer MoE router statistics.",
     )
     args = parser.parse_args()
 
@@ -656,11 +744,12 @@ def main():
 
     # Write CSV
     output_dir = Path(cfg.yaml_cfg.get("output_dir", "./outputs"))
-    csv_path = Path(args.output_csv) if args.output_csv else output_dir / "eval_metrics.csv"
+    csv_path = Path(args.output_csv) if args.output_csv else result_csv("eval_metrics")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     split_names = [s.strip() for s in args.splits.split(",") if s.strip()]
     append_csv = csv_path.exists()
     wrote_any = False
+    router_stats = RouterStatsCollector() if args.router_stats else None
 
     for split_name in split_names:
         if split_name == "val":
@@ -696,8 +785,14 @@ def main():
             device,
             remap_mscoco_category=remap_mscoco,
             label2category=l2c,
+            router_stats=router_stats,
         )
         LOG.info("Collected %d predictions for %s", len(preds), split_name)
+        predictions_dir = Path(args.predictions_dir) if args.predictions_dir else output_dir
+        predictions_dir.mkdir(parents=True, exist_ok=True)
+        predictions_path = predictions_dir / f"predictions_{split_name}.json"
+        predictions_path.write_text(json.dumps(preds), encoding="utf-8")
+        LOG.info("Wrote %s", predictions_path)
         LOG.info("Computing CaS-compatible metrics from %s ...", ann_file)
         metrics, class_names, weather_buckets = compute_cas_metrics(ann_file, preds, dataset_name)
         log_detr_eval_summary(LOG, split_name, metrics, bench_dict)
@@ -712,6 +807,13 @@ def main():
             append=append_csv,
             benchmark=bench_dict,
             weather_buckets=weather_buckets or None,
+            metadata=run_metadata(
+                run_id=f"{output_dir.parent.name}/{output_dir.name}",
+                framework=args.framework,
+                model=model_name,
+                dataset=dataset_name,
+                seed=cfg.yaml_cfg.get("seed", ""),
+            ),
         )
         append_csv = True
         wrote_any = True
@@ -720,6 +822,12 @@ def main():
         LOG.info("Wrote %s", csv_path)
     else:
         LOG.warning("No eval split was written to CSV.")
+
+    if router_stats is not None:
+        router_path = Path(args.router_stats)
+        router_path.parent.mkdir(parents=True, exist_ok=True)
+        router_path.write_text(json.dumps(router_stats.to_dict(), indent=2), encoding="utf-8")
+        LOG.info("Wrote %s", router_path)
 
     cd_wrote = _maybe_run_cross_domain_csv_row(
         cfg=cfg,

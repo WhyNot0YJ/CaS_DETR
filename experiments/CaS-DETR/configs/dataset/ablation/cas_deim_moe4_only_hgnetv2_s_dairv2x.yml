@@ -15,6 +15,7 @@ DFINETransformer:
   use_moe: True
   num_experts: 4
   moe_top_k: 2
+  dim_feedforward: 128
 
 DEIMCriterion:
   cass_loss_weight: 0.0

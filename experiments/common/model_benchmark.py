@@ -45,6 +45,9 @@ class BenchmarkResult:
     measure_iters: int = 0
     latencies_ms: List[float] = field(default_factory=list)
     includes_nms: bool = False
+    end_to_end_fps: Optional[float] = None
+    end_to_end_latency_ms: Optional[float] = None
+    end_to_end_latencies_ms: List[float] = field(default_factory=list)
 
 
 # ── GFLOPs ──────────────────────────────────────────────────────────────
@@ -340,7 +343,7 @@ def format_benchmark_report(r: BenchmarkResult) -> str:
 
 def benchmark_to_dict(r: BenchmarkResult) -> dict:
     """转换为平面 dict（用于 CSV / JSON 写入）。"""
-    return {
+    result = {
         "GFLOPs": round(r.gflops, 2),
         "Params_M": round(r.params_total / 1e6, 2),
         "Active_Params_M": round(r.params_active / 1e6, 2),
@@ -348,17 +351,22 @@ def benchmark_to_dict(r: BenchmarkResult) -> dict:
         "FPS": round(r.fps, 1),
         "Latency_ms": round(r.latency_ms, 2),
     }
+    if r.end_to_end_fps is not None:
+        result["EndToEnd_FPS"] = round(r.end_to_end_fps, 1)
+        result["EndToEnd_Latency_ms"] = round(r.end_to_end_latency_ms, 2)
+    return result
 
 
 # 写入 eval 汇总 / metrics 的列：benchmark_to_dict 的子集，顺序固定（与 CSV 表头一致）
 BENCHMARK_EVAL_METRIC_KEYS: Tuple[str, ...] = ("GFLOPs", "Params_M", "FPS", "Latency_ms")
+END_TO_END_EVAL_METRIC_KEYS: Tuple[str, ...] = ("EndToEnd_FPS", "EndToEnd_Latency_ms")
 
 
 def merge_benchmark_dict_into_metrics(metrics: dict, bench: Optional[dict]) -> None:
     """将 :func:`benchmark_to_dict` 中上述键以 float 并入 ``metrics``（原地）。"""
     if not bench:
         return
-    for k in BENCHMARK_EVAL_METRIC_KEYS:
+    for k in BENCHMARK_EVAL_METRIC_KEYS + END_TO_END_EVAL_METRIC_KEYS:
         if k not in bench:
             continue
         v = bench[k]
@@ -383,7 +391,8 @@ def format_eval_csv_cell(key: str, value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, float):
-        return f"{value:.2f}" if key in BENCHMARK_EVAL_METRIC_KEYS else f"{value:.6f}"
+        benchmark_keys = BENCHMARK_EVAL_METRIC_KEYS + END_TO_END_EVAL_METRIC_KEYS
+        return f"{value:.2f}" if key in benchmark_keys else f"{value:.6f}"
     return str(value)
 
 
@@ -413,6 +422,12 @@ def log_benchmark(
             f"  mean={float(np.mean(arr)):.2f}ms  std={float(np.std(arr)):.2f}ms  "
             f"p5={float(np.percentile(arr, 5)):.2f}ms  p95={float(np.percentile(arr, 95)):.2f}ms"
         )
+    end_to_end_stats = ""
+    if r.end_to_end_fps is not None:
+        end_to_end_stats = (
+            f"  End-to-end FPS : {r.end_to_end_fps:.1f}\n"
+            f"  End-to-end ms  : {r.end_to_end_latency_ms:.2f} ms\n"
+        )
     log_fn(
         f"{'='*72}\n"
         f"  Model Benchmark{tag}\n"
@@ -424,6 +439,7 @@ def log_benchmark(
         f"  FPS            : {r.fps:.1f}  (batch=1, {r.imgsz[0]}x{r.imgsz[1]}, {r.device}, {nms_tag})\n"
         f"  Latency (med)  : {r.latency_ms:.2f} ms  ({nms_tag})\n"
         f"  Protocol       : warmup={r.warmup_iters}, iters={r.measure_iters}, sync=cuda\n"
+        f"{end_to_end_stats}"
         f"{('  Latency stats  :' + latency_stats + chr(10)) if latency_stats else ''}"
         f"{'='*72}"
     )

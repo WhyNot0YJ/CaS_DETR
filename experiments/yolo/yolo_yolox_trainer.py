@@ -197,6 +197,12 @@ class YOLOXTrainer(BaseYOLOTrainer):
                 return p
         return None
 
+    def _tensorrt_weights_path(self) -> Optional[Path]:
+        return self._resolve_yolox_eval_ckpt()
+
+    def _tensorrt_extra_args(self) -> List[str]:
+        return ["--yolox-exp", str(self._resolve_yolox_exp_file())]
+
     def _optional_post_train_benchmark(self, model) -> Optional[dict]:
         """
         不在此处加载 YOLOX + 跑 FPS benchmark：训练刚结束显存紧张，且会与 KITTI eval 重复加载。
@@ -242,6 +248,7 @@ class YOLOXTrainer(BaseYOLOTrainer):
                 res = benchmark_yolox(
                     eval_predictor.model,
                     eval_predictor.exp,
+                    images=self._benchmark_image_dir(str(self.data_config.get("data_yaml", ""))),
                     imgsz=imgsz,
                     device=next(eval_predictor.model.parameters()).device,
                     model_name=model_name,

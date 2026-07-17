@@ -179,12 +179,54 @@ class BaseSolver(object):
         # Adjust head parameters between datasets
         try:
             adjusted_state_dict = self._adjust_head_parameters(module.state_dict(), pretrain_state_dict)
-            stat, infos = self._matched_state(module.state_dict(), adjusted_state_dict)
         except Exception:
-            stat, infos = self._matched_state(module.state_dict(), pretrain_state_dict)
+            adjusted_state_dict = pretrain_state_dict
+
+        moe_layers = self._initialize_moe_from_dense(module.state_dict(), adjusted_state_dict)
+        stat, infos = self._matched_state(module.state_dict(), adjusted_state_dict)
 
         module.load_state_dict(stat, strict=False)
+        if moe_layers:
+            print(f'Initialized {moe_layers} MoE layers from dense FFNs')
         print(f'Load model.state_dict, {infos}')
+
+    @staticmethod
+    def _initialize_moe_from_dense(state, params):
+        """Copy dense FFNs to experts and slightly perturb experts after the first."""
+        suffix = 'decoder_moe_layer.expert_w1'
+        perturbation = 1e-3
+        initialized = 0
+        for key, target_w1 in state.items():
+            if not key.endswith(suffix):
+                continue
+
+            prefix = key[:-len(suffix)]
+            dense_keys = [prefix + name for name in (
+                'linear1.weight', 'linear1.bias', 'linear2.weight', 'linear2.bias')]
+            if not all(name in params for name in dense_keys):
+                continue
+
+            w1, b1, w2, b2 = (params[name] for name in dense_keys)
+            num_experts, hidden_dim, input_dim = target_w1.shape
+            if w1.shape[1] != input_dim or w2.shape != (input_dim, w1.shape[0]) \
+                    or hidden_dim > w1.shape[0]:
+                continue
+
+            importance = w1.float().norm(dim=1) * w2.float().norm(dim=0)
+            indices = importance.topk(hidden_dim).indices.sort().values
+            expert_w1 = w1[indices].unsqueeze(0).repeat(num_experts, 1, 1)
+            expert_w2 = w2[:, indices].unsqueeze(0).repeat(num_experts, 1, 1)
+            if num_experts > 1:
+                expert_w1[1:] += torch.randn_like(expert_w1[1:]) * expert_w1[0].std() * perturbation
+                expert_w2[1:] += torch.randn_like(expert_w2[1:]) * expert_w2[0].std() * perturbation
+
+            params[key] = expert_w1
+            params[prefix + 'decoder_moe_layer.expert_b1'] = b1[indices].unsqueeze(0).repeat(num_experts, 1)
+            params[prefix + 'decoder_moe_layer.expert_w2'] = expert_w2
+            params[prefix + 'decoder_moe_layer.expert_b2'] = b2.unsqueeze(0).repeat(num_experts, 1)
+            initialized += 1
+
+        return initialized
 
     @staticmethod
     def _matched_state(state: Dict[str, torch.Tensor], params: Dict[str, torch.Tensor]):

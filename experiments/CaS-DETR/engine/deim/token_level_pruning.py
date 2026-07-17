@@ -133,7 +133,7 @@ class TokenLevelPruner(nn.Module):
         batch_size, num_tokens, channels = tokens.shape
         if spatial_shape is not None:
             H, W = spatial_shape
-            if H * W != num_tokens:
+            if not torch.onnx.is_in_onnx_export() and H * W != num_tokens:
                 raise ValueError(f"spatial_shape {spatial_shape} does not match num_tokens {num_tokens}")
         else:
             H, W = 0, 0
@@ -148,7 +148,9 @@ class TokenLevelPruner(nn.Module):
         effective_keep_ratio = dynamic_keep_ratio if dynamic_keep_ratio is not None else self.keep_ratio
 
         # Pruning is enabled if effective ratio < 1.0 (no warmup)
-        if isinstance(effective_keep_ratio, torch.Tensor):
+        if torch.onnx.is_in_onnx_export() and dynamic_keep_ratio is not None:
+            should_prune = True
+        elif isinstance(effective_keep_ratio, torch.Tensor):
             should_prune = bool((effective_keep_ratio < 1.0).any().item()) and (self.training or self.prune_in_eval)
         else:
             should_prune = (effective_keep_ratio < 1.0) and (self.training or self.prune_in_eval)
@@ -169,7 +171,7 @@ class TokenLevelPruner(nn.Module):
                 num_tokens, device=tokens.device).unsqueeze(0).expand(batch_size, -1)
             return tokens, kept_indices, info
         
-        if num_tokens <= self.min_tokens:
+        if not torch.onnx.is_in_onnx_export() and num_tokens <= self.min_tokens:
             info = {
                 'pruning_ratio': 0.0,
                 'num_kept_tokens': num_tokens,
@@ -187,6 +189,29 @@ class TokenLevelPruner(nn.Module):
         # Get keep ratio and calculate number of tokens to keep
         current_keep_ratio = dynamic_keep_ratio if dynamic_keep_ratio is not None else self.get_current_keep_ratio()
 
+        if torch.onnx.is_in_onnx_export() and dynamic_keep_ratio is not None:
+            ratio = dynamic_keep_ratio.to(device=tokens.device, dtype=torch.float32).clamp(min=0.0, max=1.0)
+            num_keep = torch.floor(ratio * float(num_tokens)).to(torch.int64)
+            num_keep = torch.clamp(num_keep, min=self.min_tokens, max=num_tokens)
+            sorted_indices = torch.argsort(token_importance_scores, dim=1, descending=True)
+            rank = torch.arange(num_tokens, device=tokens.device).unsqueeze(0).expand(batch_size, -1)
+            valid_token_mask = rank < num_keep.unsqueeze(1)
+            gather_index = sorted_indices.unsqueeze(-1).expand(-1, -1, channels)
+            pruned_tokens = torch.gather(tokens, 1, gather_index)
+            pruned_tokens = pruned_tokens * valid_token_mask.unsqueeze(-1).to(tokens.dtype)
+            info = {
+                'pruning_ratio': 1.0 - ratio.mean(),
+                'num_kept_tokens': num_keep,
+                'num_pruned_tokens': num_tokens - num_keep,
+                'num_tokens': num_tokens,
+                'num_kept_tokens_info': num_keep,
+                'token_importance_scores': token_importance_scores,
+                'valid_token_mask': valid_token_mask,
+                'new_spatial_shape': (-1, -1),
+                'original_spatial_shape': (H, W) if spatial_shape is not None else (-1, -1)
+            }
+            return pruned_tokens, sorted_indices if return_indices else None, info
+
         # Case 1: scalar ratio (same for all images)
         if not isinstance(current_keep_ratio, torch.Tensor):
             num_keep_tokens_by_ratio = int(num_tokens * float(current_keep_ratio))
@@ -194,15 +219,16 @@ class TokenLevelPruner(nn.Module):
 
             # 选择top-k tokens
             _, top_token_indices = torch.topk(token_importance_scores, num_keep_tokens, dim=-1)
-            top_token_indices_sorted, _ = torch.sort(top_token_indices, dim=-1)
+            if torch.onnx.is_in_onnx_export():
+                kept_indices = top_token_indices
+            else:
+                kept_indices, _ = torch.sort(top_token_indices, dim=-1)
 
             # 收集保留的tokens
-            batch_indices = torch.arange(batch_size, device=tokens.device).unsqueeze(1).expand(-1, num_keep_tokens)
-            pruned_tokens = tokens[batch_indices, top_token_indices_sorted]
+            gather_index = kept_indices.unsqueeze(-1).expand(-1, -1, channels)
+            pruned_tokens = torch.gather(tokens, dim=1, index=gather_index)
 
-            if return_indices:
-                kept_indices = top_token_indices_sorted
-            else:
+            if not return_indices:
                 kept_indices = None
 
             # 计算新的空间形状（近似）
@@ -256,6 +282,7 @@ class TokenLevelPruner(nn.Module):
             'num_tokens': num_tokens,
             'num_kept_tokens_info': num_keep,
             'token_importance_scores': token_importance_scores,
+            'valid_token_mask': kept_indices_out >= 0,
             'new_spatial_shape': (-1, -1),
             'original_spatial_shape': (H, W) if spatial_shape is not None else (-1, -1)
         }

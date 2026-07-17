@@ -51,16 +51,16 @@ def main(args, ):
 
     model = Model()
 
-    data = torch.rand(32, 3, 640, 640)
-    size = torch.tensor([[640, 640]])
+    data = torch.rand(args.batch_size, 3, args.height, args.width)
+    size = torch.tensor([[args.height, args.width]]).repeat(args.batch_size, 1)
     _ = model(data, size)
 
-    dynamic_axes = {
+    dynamic_axes = None if args.static_batch else {
         'images': {0: 'N', },
         'orig_target_sizes': {0: 'N'}
     }
 
-    output_file = args.resume.replace('.pth', '.onnx') if args.resume else 'model.onnx'
+    output_file = args.output or (args.resume.replace('.pth', '.onnx') if args.resume else 'model.onnx')
 
     torch.onnx.export(
         model,
@@ -69,7 +69,7 @@ def main(args, ):
         input_names=['images', 'orig_target_sizes'],
         output_names=['labels', 'boxes', 'scores'],
         dynamic_axes=dynamic_axes,
-        opset_version=16,
+        opset_version=args.opset,
         verbose=False,
         do_constant_folding=True,
     )
@@ -97,7 +97,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', '-c', default='configs/dfine/dfine_hgnetv2_l_coco.yml', type=str, )
     parser.add_argument('--resume', '-r', type=str, )
-    parser.add_argument('--check',  action='store_true', default=True,)
-    parser.add_argument('--simplify',  action='store_true', default=True,)
+    parser.add_argument('--output', '-o', type=str)
+    parser.add_argument('--batch-size', type=int, default=1)
+    parser.add_argument('--height', type=int, default=640)
+    parser.add_argument('--width', type=int, default=640)
+    parser.add_argument('--opset', type=int, default=17)
+    parser.add_argument('--static-batch', action='store_true')
+    parser.add_argument('--check', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--simplify', action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
     main(args)

@@ -178,7 +178,6 @@ if __name__ == '__main__':
     )
     parser.add_argument('-d', '--device', type=str, help='device')
     parser.add_argument('--seed', type=int, help='exp reproducibility')
-    parser.add_argument('--use-amp', action='store_true', help='auto mixed precision training')
     parser.add_argument('--output-dir', type=str, help='output directory')
     parser.add_argument('--summary-dir', type=str, help='tensorboard summary')
     parser.add_argument(

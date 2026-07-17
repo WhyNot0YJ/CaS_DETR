@@ -114,6 +114,7 @@ def main():
         resume_checkpoint=args.resume_from_checkpoint,
         epochs_override=args.epochs,
     )
+    trainer.run_tensorrt_benchmark()
 
 
 def _infer_dataset_log_subdir(config: dict) -> Optional[str]:

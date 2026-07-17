@@ -11,6 +11,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from common.result_paths import append_csv_rows, upsert_csv_rows
+from common.model_benchmark import BENCHMARK_EVAL_METRIC_KEYS, END_TO_END_EVAL_METRIC_KEYS
+
 import numpy as np
 
 _LOG = logging.getLogger(__name__)
@@ -73,8 +76,8 @@ def extract_per_category_ap_from_coco_eval(
 
     Extract per-category AP@0.5 and AP@0.5:0.95 from ``COCOeval`` for shared DETR / YOLO reporting.
     """
-    per_cat_50 = {str(cat["name"]): 0.0 for cat in categories}
-    per_cat_5095 = {str(cat["name"]): 0.0 for cat in categories}
+    per_cat_50 = {canonical_category_metric_name(cat["name"]): 0.0 for cat in categories}
+    per_cat_5095 = {canonical_category_metric_name(cat["name"]): 0.0 for cat in categories}
     if coco_eval is None or not hasattr(coco_eval, "eval") or "precision" not in coco_eval.eval:
         return per_cat_50, per_cat_5095
 
@@ -86,7 +89,7 @@ def extract_per_category_ap_from_coco_eval(
 
         for cat in categories:
             cat_id = cat["id"]
-            cat_name = str(cat["name"])
+            cat_name = canonical_category_metric_name(cat["name"])
             if cat_id not in cat_id_to_index:
                 continue
 
@@ -254,7 +257,6 @@ EVAL_CSV_FIELDS: List[str] = [
     "dataset",
     "eval_split",
     "mAP_50",
-    "mAP_75",
     "mAP_5095",
     "AP_small_50",
     "AP_medium_50",
@@ -268,9 +270,18 @@ BENCHMARK_CSV_FIELDS: List[str] = [
     "Params_M",
     "Active_Params_M",
     "GFLOPs",
-    "FPS",
-    "Latency_ms",
+    "Inference_FPS",
+    "Inference_Latency_ms",
 ]
+
+
+def canonical_category_metric_name(name: object) -> str:
+    """Normalize a class label into a stable CSV column suffix."""
+    text = str(name).strip().lower()
+    text = text.replace(" ", "_").replace("-", "_")
+    while "__" in text:
+        text = text.replace("__", "_")
+    return text or "unknown"
 
 
 def write_eval_csv(
@@ -284,6 +295,7 @@ def write_eval_csv(
     append: bool = False,
     benchmark: Optional[Dict[str, float]] = None,
     weather_buckets: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, object]] = None,
 ) -> None:
     """
     将一行评估指标写入 CSV。
@@ -299,21 +311,21 @@ def write_eval_csv(
     （由 ``common.model_benchmark.benchmark_to_dict`` 生成）。
     """
     key_map = {
-        "mAP_50": "mAP_0.5",
-        "mAP_75": "mAP_0.75",
-        "mAP_5095": "mAP_0.5_0.95",
-        "AP_small_50": "AP_small_50",
-        "AP_medium_50": "AP_medium_50",
-        "AP_large_50": "AP_large_50",
-        "AP_small_5095": "AP_small",
-        "AP_medium_5095": "AP_medium",
-        "AP_large_5095": "AP_large",
+        "mAP_50": ("mAP_50", "mAP_0.5"),
+        "mAP_5095": ("mAP_5095", "mAP_0.5_0.95"),
+        "AP_small_50": ("AP_small_50",),
+        "AP_medium_50": ("AP_medium_50",),
+        "AP_large_50": ("AP_large_50",),
+        "AP_small_5095": ("AP_small_5095", "AP_small"),
+        "AP_medium_5095": ("AP_medium_5095", "AP_medium"),
+        "AP_large_5095": ("AP_large_5095", "AP_large"),
     }
     fieldnames = list(EVAL_CSV_FIELDS)
     if class_names:
         for name in class_names:
-            fieldnames.append(f"AP50_{name}")
-            fieldnames.append(f"AP5095_{name}")
+            suffix = canonical_category_metric_name(name)
+            fieldnames.append(f"AP50_{suffix}")
+            fieldnames.append(f"AP5095_{suffix}")
     if weather_buckets:
         for bucket in weather_buckets:
             fieldnames.append(f"weather_{bucket}_mAP_50")
@@ -325,16 +337,21 @@ def write_eval_csv(
         "dataset": dataset,
         "eval_split": eval_split,
     }
-    for csv_col, metric_key in key_map.items():
-        v = metrics.get(metric_key, 0.0)
+    for csv_col, metric_keys in key_map.items():
+        v = 0.0
+        for metric_key in metric_keys:
+            if metric_key in metrics:
+                v = metrics.get(metric_key, 0.0)
+                break
         row[csv_col] = f"{float(v):.6f}" if isinstance(v, (int, float)) else str(v)
 
     if class_names:
         for name in class_names:
-            v50 = metrics.get(f"AP50_{name}", 0.0)
-            v5095 = metrics.get(f"AP5095_{name}", 0.0)
-            row[f"AP50_{name}"] = f"{float(v50):.6f}" if isinstance(v50, (int, float)) else str(v50)
-            row[f"AP5095_{name}"] = f"{float(v5095):.6f}" if isinstance(v5095, (int, float)) else str(v5095)
+            suffix = canonical_category_metric_name(name)
+            v50 = metrics.get(f"AP50_{suffix}", metrics.get(f"AP50_{name}", 0.0))
+            v5095 = metrics.get(f"AP5095_{suffix}", metrics.get(f"AP5095_{name}", 0.0))
+            row[f"AP50_{suffix}"] = f"{float(v50):.6f}" if isinstance(v50, (int, float)) else str(v50)
+            row[f"AP5095_{suffix}"] = f"{float(v5095):.6f}" if isinstance(v5095, (int, float)) else str(v5095)
 
     if weather_buckets:
         for bucket in weather_buckets:
@@ -344,18 +361,20 @@ def write_eval_csv(
             row[f"weather_{bucket}_mAP_5095"] = f"{float(v5095):.6f}" if isinstance(v5095, (int, float)) else str(v5095)
 
     if benchmark:
-        for bk in BENCHMARK_CSV_FIELDS:
-            bv = benchmark.get(bk, "")
-            row[bk] = f"{float(bv):.2f}" if isinstance(bv, (int, float)) else str(bv)
-
-    mode = "a" if append else "w"
-    write_header = not append or not path.exists() or path.stat().st_size == 0
-
-    with path.open(mode, newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
-        if write_header:
-            writer.writeheader()
-        writer.writerow(row)
+        benchmark_key_map = {
+            "Inference_FPS": "FPS",
+            "Inference_Latency_ms": "Latency_ms",
+            **{key: key for key in END_TO_END_EVAL_METRIC_KEYS},
+        }
+        for csv_key, benchmark_key in benchmark_key_map.items():
+            bv = benchmark.get(benchmark_key, "")
+            row[csv_key] = f"{float(bv):.2f}" if isinstance(bv, (int, float)) else str(bv)
+    if metadata:
+        row = {**metadata, **row}
+    if metadata and metadata.get("run_id"):
+        upsert_csv_rows(path, [row], key_fields=("run_id", "eval_split"))
+    else:
+        append_csv_rows(path, [row])
 
 
 def dataset_display_name(config: Dict) -> str:

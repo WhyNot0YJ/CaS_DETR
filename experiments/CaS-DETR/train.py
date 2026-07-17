@@ -11,7 +11,15 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 import argparse
+import copy
+import json
+import platform
+import shutil
+import subprocess
 from pathlib import Path
+
+import torch
+import yaml
 
 from engine.misc import dist_utils
 from engine.core import YAMLConfig, yaml_utils
@@ -48,6 +56,45 @@ def _resolve_tuning_checkpoint(cfg):
             cfg.yaml_cfg.pop('tuning', None)
 
 
+def _save_run_metadata(cfg, config_path):
+    """Save the resolved protocol and runtime identity beside checkpoints."""
+    if not dist_utils.is_main_process():
+        return
+
+    output_dir = Path(cfg.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_config = copy.deepcopy(cfg.yaml_cfg)
+    resolved_config.pop('__include__', None)
+    with (output_dir / 'resolved_config.yml').open('w', encoding='utf-8') as f:
+        yaml.safe_dump(resolved_config, f, sort_keys=False, allow_unicode=True)
+    shutil.copy2(config_path, output_dir / 'source_config.yml')
+
+    def command_output(command):
+        try:
+            return subprocess.run(
+                command, check=False, capture_output=True, text=True
+            ).stdout.strip()
+        except OSError:
+            return ''
+
+    environment = {
+        'python': platform.python_version(),
+        'platform': platform.platform(),
+        'torch': torch.__version__,
+        'cuda': torch.version.cuda,
+        'cudnn': torch.backends.cudnn.version(),
+        'gpu': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        'driver': command_output([
+            'nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader'
+        ]),
+        'git_commit': command_output(['git', 'rev-parse', 'HEAD']),
+        'git_status': command_output(['git', 'status', '--short']),
+        'pip_freeze': command_output([sys.executable, '-m', 'pip', 'freeze']).splitlines(),
+    }
+    with (output_dir / 'environment.json').open('w', encoding='utf-8') as f:
+        json.dump(environment, f, indent=2, ensure_ascii=False)
+
+
 def main(args, ) -> None:
     """main
     """
@@ -59,6 +106,7 @@ def main(args, ) -> None:
 
     cfg = YAMLConfig(args.config, **update_dict)
     _resolve_tuning_checkpoint(cfg)
+    _save_run_metadata(cfg, args.config)
 
     if args.resume and getattr(cfg, 'tuning', None):
         raise RuntimeError('Use either resume or tuning, not both.')
@@ -92,7 +140,6 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--tuning', type=str, help='tuning from checkpoint')
     parser.add_argument('-d', '--device', type=str, help='device',)
     parser.add_argument('--seed', type=int, help='exp reproducibility')
-    parser.add_argument('--use-amp', action='store_true', help='auto mixed precision training')
     parser.add_argument('--output-dir', type=str, help='output directoy')
     parser.add_argument('--summary-dir', type=str, help='tensorboard summry')
     parser.add_argument('--test-only', action='store_true', default=False,)
