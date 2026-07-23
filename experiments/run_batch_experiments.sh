@@ -157,11 +157,14 @@ run_trt_benchmark_for_eval() {
         log_warning "TensorRT benchmark 跳过（缺少 checkpoint）: $output_dir"
         return 0
     fi
+    local run_id
+    run_id="$(basename "$(dirname "$output_dir")")/$(basename "$output_dir")"
     log_info "运行 TensorRT benchmark（FPS 将写入主表最后一列）: $model"
     "$PYTHON_BIN" "$SCRIPT_DIR/CaS-DETR/tools/benchmark/benchmark_experiment_trt.py" \
         --framework "$framework" --config "$SCRIPT_DIR/$config" \
         --checkpoint "$SCRIPT_DIR/$checkpoint" --output-dir "$SCRIPT_DIR/$output_dir" \
         --model "$model" --images "$images" \
+        --run-id "$run_id" \
         --trtexec "$TRTEXEC" --warmup "$TRT_WARMUP" --iterations "$TRT_ITERATIONS" \
         || log_warning "TensorRT benchmark 失败（不影响训练结果）: $model"
 }
@@ -1099,6 +1102,9 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         if [ "$has_cas_moe_capacity_scan" = true ]; then
             local _p
             for _p in "${CAS_MOE_CAPACITY_SCAN_EXPERIMENTS[@]}"; do
+                if [ "${CAS_SKIP_SHARED_MOE4:-0}" = "1" ] && [[ "$_p" == *"moe4_cap05x"* ]]; then
+                    continue
+                fi
                 if filter_config "$_p"; then
                     CONFIGS_TO_RUN+=("$_p")
                 fi

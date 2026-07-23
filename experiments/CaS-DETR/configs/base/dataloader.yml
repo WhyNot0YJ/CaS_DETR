@@ -19,13 +19,19 @@ train_dataloader:
 
   collate_fn:
     type: BatchImageCollateFunction
+    gpu_augment: True
     base_size: 640
     base_size_repeat: 3
     stop_epoch: 72 # epoch in [72, ~) stop `multiscales`
 
   shuffle: True
-  total_batch_size: 32 # total batch size equals to 32 (4 * 8)
-  num_workers: 4
+  total_batch_size: 16 # total batch size equals to 16 (4 * 4)
+  num_workers: 8
+  worker_cpu_threads: 1
+  pin_memory: True
+  # Must stay false: worker-local dataset/collate epoch state drives Mosaic/MixUp.
+  persistent_workers: False
+  prefetch_factor: 4
 
 
 val_dataloader:
@@ -35,5 +41,10 @@ val_dataloader:
         - {type: Resize, size: [640, 640], }
         - {type: ConvertPILImage, dtype: 'float32', scale: True}
   shuffle: False
-  total_batch_size: 64
-  num_workers: 4
+  total_batch_size: 16
+  num_workers: 8
+  worker_cpu_threads: 1
+  pin_memory: True
+  # Must stay false: worker-local dataset/collate epoch state drives Mosaic/MixUp.
+  persistent_workers: False
+  prefetch_factor: 4

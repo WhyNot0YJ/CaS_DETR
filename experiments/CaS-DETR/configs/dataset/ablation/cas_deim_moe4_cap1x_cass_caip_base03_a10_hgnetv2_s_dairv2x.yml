@@ -28,3 +28,11 @@ DFINETransformer:
 
 DEIMCriterion:
   decoder_moe_balance_weight: 0.005
+
+train_dataloader:
+  total_batch_size: 16
+  num_workers: 8
+
+val_dataloader:
+  total_batch_size: 16
+  num_workers: 8

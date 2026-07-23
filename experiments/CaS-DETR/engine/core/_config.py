@@ -45,6 +45,10 @@ class BaseConfig(object):
 
         # dataset
         self.num_workers :int = 0
+        self.pin_memory :bool = True
+        # Keep false: worker-local epoch state controls Mosaic/MixUp policies.
+        self.persistent_workers :bool = False
+        self.prefetch_factor :int = 4
         self.batch_size :int = None
         self._train_batch_size :int = None
         self._val_batch_size :int = None
@@ -140,7 +144,10 @@ class BaseConfig(object):
                                 batch_size=self.train_batch_size,
                                 num_workers=self.num_workers,
                                 collate_fn=self.collate_fn,
-                                shuffle=self.train_shuffle, )
+                                shuffle=self.train_shuffle,
+                                pin_memory=self.pin_memory,
+                                persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+                                prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None, )
             loader.shuffle = self.train_shuffle
             self._train_dataloader = loader
 
@@ -159,7 +166,9 @@ class BaseConfig(object):
                                 drop_last=False,
                                 collate_fn=self.collate_fn,
                                 shuffle=self.val_shuffle,
-                                persistent_workers=True)
+                                pin_memory=self.pin_memory,
+                                persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+                                prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None)
             loader.shuffle = self.val_shuffle
             self._val_dataloader = loader
 
