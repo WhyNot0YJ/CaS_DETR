@@ -6,6 +6,7 @@ includes image reading, letterbox, host-to-device, and result copies.
 """
 
 import argparse
+import gc
 import shutil
 import subprocess
 import sys
@@ -166,6 +167,11 @@ def main():
     benchmark_csv = result_csv("benchmark")
 
     export_onnx(args.weights, onnx, args)
+    # ONNX export may leave the PyTorch model/context cached on CUDA. Release
+    # it before launching TensorRT's separate builder process.
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     shared_dir = experiments_dir / "CaS-DETR" / "tools"
     use_trtexec = args.builder == "trtexec" or (

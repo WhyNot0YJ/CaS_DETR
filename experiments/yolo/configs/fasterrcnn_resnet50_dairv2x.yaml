@@ -3,6 +3,7 @@ model:
 
 training:
   epochs: 100
+  imgsz: 640
 
 data:
   data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO/dairv2x.yaml"

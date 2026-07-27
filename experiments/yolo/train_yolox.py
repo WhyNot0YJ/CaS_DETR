@@ -114,6 +114,13 @@ def main():
         resume_checkpoint=args.resume_from_checkpoint,
         epochs_override=args.epochs,
     )
+    # YOLOX leaves CUDA allocations alive after training/evaluation. Release
+    # them before TensorRT creates a second CUDA context and execution engine.
+    import gc
+    import torch
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     trainer.run_tensorrt_benchmark()
 
 

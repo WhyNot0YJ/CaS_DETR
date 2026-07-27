@@ -175,6 +175,10 @@ def main():
         trainer.num_classes = len(class_names)
         trainer.VERSION = version
 
+    # The standalone evaluator bypasses the normal trainer constructor.
+    # Keep the shared CSV identity consistent with a regular training run.
+    trainer.experiment_name = log_dir.name
+
     logger.info(f"实验目录: {log_dir}")
     logger.info(f"推理设备: {trainer.misc_config.get('device', 'cpu')}")
     if is_yolox:
@@ -204,8 +208,13 @@ def main():
     if metrics:
         logger.info("=" * 60)
         logger.info("评估完成")
-        logger.info(f"  mAP@0.5 全类:      {metrics.get('mAP_50_all', 0):.4f}")
-        logger.info(f"  mAP@0.5:0.95 全类: {metrics.get('mAP_5095_all', 0):.4f}")
+        logger.info(
+            f"  mAP@0.5 全类:      {metrics.get('mAP_50', metrics.get('mAP_50_all', 0)):.4f}"
+        )
+        logger.info(
+            f"  mAP@0.5:0.95 全类: "
+            f"{metrics.get('mAP_5095', metrics.get('mAP_5095_all', 0)):.4f}"
+        )
         logger.info(
             f"  COCO 面积档 @0.5 S/M/L:   {metrics.get('mAP_small',0):.4f} / "
             f"{metrics.get('mAP_medium',0):.4f} / {metrics.get('mAP_large',0):.4f}"

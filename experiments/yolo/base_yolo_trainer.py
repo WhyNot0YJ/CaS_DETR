@@ -367,9 +367,34 @@ class BaseYOLOTrainer(ABC):
         """
         self._resume_checkpoint_path = resume_checkpoint
         self.setup_logging()  # 重新初始化日志
-        
-        # 创建模型
-        model = self.create_model()
+
+        resume_model_path: Optional[Path] = None
+        if resume_checkpoint:
+            checkpoint_path = Path(resume_checkpoint)
+            if checkpoint_path.is_file():
+                resume_model_path = checkpoint_path
+            elif checkpoint_path.is_dir():
+                for candidate in (
+                    checkpoint_path / "weights" / "last.pt",
+                    checkpoint_path / "weights" / "best.pt",
+                    checkpoint_path / "last.pt",
+                    checkpoint_path / "best.pt",
+                ):
+                    if candidate.is_file():
+                        resume_model_path = candidate
+                        break
+            if resume_model_path is None:
+                raise FileNotFoundError(f"未找到可用于恢复的检查点: {resume_checkpoint}")
+
+        # 创建模型；恢复训练时直接从 checkpoint 重新构建，避免 Ultralytics
+        # 把 base 权重当成新的起点，从而误判“无可恢复状态”。
+        if resume_model_path is not None:
+            from ultralytics import YOLO as _YOLO
+
+            self.logger.info(f"📦 从检查点加载模型对象: {resume_model_path}")
+            model = _YOLO(str(resume_model_path))
+        else:
+            model = self.create_model()
         
         # 构建训练参数
         train_kwargs = self._build_train_kwargs()
@@ -381,12 +406,9 @@ class BaseYOLOTrainer(ABC):
             self.logger.info(f"⚠️  测试模式：使用命令行参数覆盖epochs ({config_epochs} → {epochs_override})")
         
         # 恢复训练
-        if resume_checkpoint and Path(resume_checkpoint).exists():
-            self.logger.info(f"📦 从检查点恢复训练: {resume_checkpoint}")
-            if Path(resume_checkpoint).is_file():
-                train_kwargs['resume'] = str(resume_checkpoint)
-            else:
-                train_kwargs['resume'] = True
+        if resume_model_path is not None:
+            self.logger.info(f"📦 从检查点恢复训练: {resume_model_path}")
+            train_kwargs['resume'] = True
         
         # 记录配置
         self._log_training_config(train_kwargs)
@@ -560,6 +582,40 @@ class BaseYOLOTrainer(ABC):
     def _can_run_kitti_eval_without_ultralytics_model(self) -> bool:
         """If True, run KITTI/scale eval even when ``model`` is None (e.g. YOLOX)."""
         return False
+
+    def _kitti_eval_batch_size(self) -> int:
+        """Return the initial post-training evaluation batch size.
+
+        Evaluation is independent from the training batch size.  The
+        environment override is useful for one-off low-VRAM reruns without
+        changing a saved training config; ``data.eval_batch_size`` provides a
+        persistent per-dataset override.
+        """
+        candidates = (
+            os.environ.get("CAS_EVAL_BATCH_SIZE"),
+            self.data_config.get("eval_batch_size"),
+        )
+        for raw in candidates:
+            if raw is None or not str(raw).strip():
+                continue
+            try:
+                value = int(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"eval_batch_size must be an integer, got {raw!r}"
+                ) from exc
+            if value < 1:
+                raise ValueError(f"eval_batch_size must be positive, got {value}")
+            return value
+        return 32
+
+    @staticmethod
+    def _is_cuda_oom(exc: BaseException) -> bool:
+        """Recognize CUDA allocation failures that are safe to retry smaller."""
+        message = str(exc).lower()
+        return isinstance(exc, RuntimeError) and (
+            "out of memory" in message or "cudaerrormemoryallocation" in message
+        )
 
     def _canonical_dataset_name(self) -> str:
         """
@@ -743,12 +799,31 @@ class BaseYOLOTrainer(ABC):
                 weather_by_image_id: Dict[int, str] = {}
                 ann_id = 0
 
-                BATCH = 32
-                for batch_start in range(0, len(eval_images), BATCH):
-                    batch_paths = eval_images[batch_start: batch_start + BATCH]
-                    batch_results = self._predict_batch_kitti_eval(
-                        eval_predictor, batch_paths, imgsz, device
-                    )
+                eval_batch_size = self._kitti_eval_batch_size()
+                batch_start = 0
+                while batch_start < len(eval_images):
+                    batch_paths = eval_images[
+                        batch_start: batch_start + eval_batch_size
+                    ]
+                    try:
+                        batch_results = self._predict_batch_kitti_eval(
+                            eval_predictor, batch_paths, imgsz, device
+                        )
+                    except RuntimeError as exc:
+                        if not self._is_cuda_oom(exc) or len(batch_paths) <= 1:
+                            raise
+                        next_batch_size = max(1, len(batch_paths) // 2)
+                        self.logger.warning(
+                            "[%s] 评估 batch=%d OOM，释放显存后降为 batch=%d 重试",
+                            eval_split,
+                            len(batch_paths),
+                            next_batch_size,
+                        )
+                        eval_batch_size = next_batch_size
+                        gc.collect()
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                        continue
                     for i_in_batch, (result, img_path) in enumerate(
                         zip(batch_results, batch_paths)
                     ):
@@ -840,6 +915,8 @@ class BaseYOLOTrainer(ABC):
                                                 "bbox": [x1, y1, w_px, h_px],
                                             }
                                         )
+
+                    batch_start += len(batch_paths)
 
                 if os.getenv("CAS_DEBUG_AREA_METRICS", "0") == "1":
                     gt_counts = coco_area_bucket_counts_from_xywh_annotations(debug_gt_annotations)
@@ -1041,7 +1118,7 @@ class BaseYOLOTrainer(ABC):
                     },
                     metadata={
                         'run_id': self.log_dir.name,
-                        'framework': 'yolo',
+                        'framework': getattr(self, 'REPORT_FRAMEWORK', 'yolo'),
                         'experiment': self.experiment_name,
                         'seed': self.config.get('seed', ''),
                     },
@@ -1199,6 +1276,11 @@ class BaseYOLOTrainer(ABC):
             df = pd.read_csv(results_csv)
             if 'run_id' in df.columns:
                 df = df[df['run_id'].astype(str) == self.log_dir.name]
+            # Shared results.csv can contain mixed producers; keep plotting
+            # numeric-only rows so a string run_id never reaches matplotlib.
+            if 'epoch' in df.columns:
+                df['epoch'] = pd.to_numeric(df['epoch'], errors='coerce')
+                df = df.dropna(subset=['epoch'])
             self.logger.info("=" * 80)
             self.logger.info("训练过程摘要:")
             self.logger.info("=" * 80)
@@ -1243,7 +1325,11 @@ class BaseYOLOTrainer(ABC):
             df = pd.read_csv(results_csv)
             if 'run_id' in df.columns:
                 df = df[df['run_id'].astype(str) == self.log_dir.name]
-            epochs = df.get('epoch', range(1, len(df) + 1)).values
+            epochs = df.get('epoch', pd.Series(range(1, len(df) + 1), index=df.index))
+            epochs = pd.to_numeric(epochs, errors='coerce')
+            valid = epochs.notna()
+            df = df.loc[valid]
+            epochs = epochs.loc[valid].to_numpy()
             
             # 提取损失
             train_loss_cols = [c for c in df.columns if 'train/box_loss' in c.lower() or 
@@ -1251,19 +1337,25 @@ class BaseYOLOTrainer(ABC):
             val_loss_cols = [c for c in df.columns if 'val/box_loss' in c.lower() or 
                             'val/cls_loss' in c.lower() or 'val/dfl_loss' in c.lower()]
             
-            train_loss = df[train_loss_cols].sum(axis=1).values if train_loss_cols else None
-            val_loss = df[val_loss_cols].sum(axis=1).values if val_loss_cols else None
+            train_loss = (
+                df[train_loss_cols].apply(pd.to_numeric, errors='coerce').sum(axis=1).to_numpy()
+                if train_loss_cols else None
+            )
+            val_loss = (
+                df[val_loss_cols].apply(pd.to_numeric, errors='coerce').sum(axis=1).to_numpy()
+                if val_loss_cols else None
+            )
             
             # 提取mAP
             map50_col = next((c for c in df.columns if 'map50(b)' in c.lower()), None)
             map50_95_col = next((c for c in df.columns if 'map50-95(b)' in c.lower()), None)
             
-            map50 = df[map50_col].values if map50_col else None
-            map50_95 = df[map50_95_col].values if map50_95_col else None
+            map50 = pd.to_numeric(df[map50_col], errors='coerce').to_numpy() if map50_col else None
+            map50_95 = pd.to_numeric(df[map50_95_col], errors='coerce').to_numpy() if map50_95_col else None
             
             # 提取学习率
             lr_col = next((c for c in df.columns if 'lr' in c.lower()), None)
-            lr = df[lr_col].values if lr_col else None
+            lr = pd.to_numeric(df[lr_col], errors='coerce').to_numpy() if lr_col else None
             
             # 绘制
             fig, axes = plt.subplots(1, 3, figsize=(18, 5))

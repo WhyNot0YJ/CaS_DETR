@@ -124,6 +124,7 @@ def main():
         resume_checkpoint=args.resume_from_checkpoint,
         epochs_override=args.epochs,
     )
+    trainer.run_tensorrt_benchmark()
 
 
 if __name__ == "__main__":

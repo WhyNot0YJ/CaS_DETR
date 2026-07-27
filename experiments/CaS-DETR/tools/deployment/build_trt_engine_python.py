@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument("--workspace-mib", type=int, default=4096)
     parser.add_argument("--max-aux-streams", type=int)
     parser.add_argument("--builder-optimization-level", type=int, choices=range(0, 6), default=5)
+    parser.add_argument("--init-plugins", action="store_true")
     return parser.parse_args()
 
 
@@ -33,6 +34,14 @@ def main():
     onnx_path = args.onnx.resolve()
     engine_path = args.engine.resolve()
     logger = trt.Logger(trt.Logger.INFO)
+    if args.init_plugins:
+        trt.init_libnvinfer_plugins(logger, "")
+        creators = trt.get_plugin_registry().plugin_creator_list
+        if not any("roialign" in creator.name.lower() for creator in creators):
+            raise RuntimeError(
+                "TensorRT ROIAlign plugin is unavailable. Install the TensorRT plugin "
+                "libraries matching the Python TensorRT package."
+            )
     builder = trt.Builder(logger)
     explicit_batch = getattr(trt.NetworkDefinitionCreationFlag, "EXPLICIT_BATCH", None)
     network_flags = 0 if explicit_batch is None else 1 << int(explicit_batch)
@@ -57,6 +66,11 @@ def main():
         onnx_bytes = model.SerializeToString()
     if not parser.parse(onnx_bytes):
         errors = [str(parser.get_error(index)) for index in range(parser.num_errors)]
+        if any("libnvinfer_vc_plugin" in error for error in errors):
+            raise RuntimeError(
+                "TensorRT plugin library is incomplete: libnvinfer_vc_plugin.so is "
+                "required for Faster R-CNN RoiAlign export.\n" + "\n".join(errors)
+            )
         raise RuntimeError("ONNX parse failed:\n" + "\n".join(errors))
 
     config = builder.create_builder_config()

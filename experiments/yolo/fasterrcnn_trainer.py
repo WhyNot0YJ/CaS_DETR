@@ -8,6 +8,9 @@ import sys
 import time
 import math
 import logging
+import gc
+import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
@@ -31,10 +34,14 @@ if str(_yolo_dir) not in sys.path:
 from base_yolo_trainer import DEFAULT_TRAIN_BATCH, BaseYOLOTrainer
 from common.result_paths import append_csv_rows, result_csv
 from fasterrcnn_dataset import (
+    DetectionCompose,
+    LetterboxDetection,
     YOLOFormatDetectionDataset,
     RandomHorizontalFlipDetection,
     detection_collate_fn,
+    letterbox_image,
     resolve_split_dirs,
+    unletterbox_boxes,
 )
 from common.model_benchmark import benchmark_model, benchmark_to_dict, log_benchmark
 
@@ -82,6 +89,7 @@ class _BenchmarkInputAdapter(nn.Module):
 
 class FasterRCNNTrainer(BaseYOLOTrainer):
     VERSION = "fasterrcnn"
+    REPORT_FRAMEWORK = "fasterrcnn"
 
     def __init__(
         self,
@@ -92,6 +100,12 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
     ):
         super().__init__(config, config_path, class_names, resume_checkpoint=resume_checkpoint)
 
+    def _input_size(self) -> int:
+        imgsz = int(self.training_config.get("imgsz", 640))
+        if imgsz <= 0:
+            raise ValueError(f"training.imgsz must be positive, got {imgsz}")
+        return imgsz
+
     # ── model creation ────────────────────────────────────────────────
 
     def create_model(self) -> nn.Module:
@@ -99,7 +113,10 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
         self.logger.info("✓ 创建 Faster R-CNN (ResNet-50 FPN, COCO V1 预训练)")
-        model = fasterrcnn_resnet50_fpn(weights="DEFAULT")
+        imgsz = self._input_size()
+        model = fasterrcnn_resnet50_fpn(
+            weights="DEFAULT", min_size=imgsz, max_size=imgsz,
+        )
 
         in_features = model.roi_heads.box_predictor.cls_score.in_features
         nc_with_bg = self.num_classes + 1
@@ -115,7 +132,10 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         from torchvision.models.detection import fasterrcnn_resnet50_fpn
         from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
-        model = fasterrcnn_resnet50_fpn(weights=None)
+        imgsz = self._input_size()
+        model = fasterrcnn_resnet50_fpn(
+            weights=None, weights_backbone=None, min_size=imgsz, max_size=imgsz,
+        )
         in_features = model.roi_heads.box_predictor.cls_score.in_features
         model.roi_heads.box_predictor = FastRCNNPredictor(
             in_features, self.num_classes + 1
@@ -144,6 +164,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         )
         num_workers = self.misc_config.get("num_workers", 2)
         data_yaml = self._resolve_data_yaml()
+        imgsz = self._input_size()
 
         # datasets
         train_img_dir, train_lbl_dir = resolve_split_dirs(data_yaml, "train")
@@ -151,9 +172,15 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
 
         train_ds = YOLOFormatDetectionDataset(
             str(train_img_dir), str(train_lbl_dir),
-            transform=RandomHorizontalFlipDetection(0.5),
+            transform=DetectionCompose([
+                LetterboxDetection(imgsz),
+                RandomHorizontalFlipDetection(0.5),
+            ]),
         )
-        val_ds = YOLOFormatDetectionDataset(str(val_img_dir), str(val_lbl_dir))
+        val_ds = YOLOFormatDetectionDataset(
+            str(val_img_dir), str(val_lbl_dir),
+            transform=LetterboxDetection(imgsz),
+        )
 
         train_loader = DataLoader(
             train_ds, batch_size=batch_size, shuffle=True,
@@ -376,6 +403,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         if not rows:
             return
         df = pd.DataFrame(rows)
+        df.to_csv(self.log_dir / "results.csv", index=False)
         csv_path = result_csv("results")
         append_csv_rows(
             csv_path,
@@ -504,17 +532,28 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
 
         images = []
         orig_shapes = []
+        letterbox_params = []
+        input_size = self._input_size()
         for p in batch_paths:
             img = Image.open(p).convert("RGB")
             w, h = img.size
             orig_shapes.append((h, w))
-            images.append(TF.to_tensor(img).to(device))
+            image, scale, pad_left, pad_top = letterbox_image(
+                TF.to_tensor(img), input_size,
+            )
+            images.append(image.to(device))
+            letterbox_params.append((scale, pad_left, pad_top))
 
         with torch.no_grad():
             outputs = predictor(images)
 
         results = []
-        for orig_shape, out in zip(orig_shapes, outputs):
+        for orig_shape, params, out in zip(orig_shapes, letterbox_params, outputs):
+            scale, pad_left, pad_top = params
+            out = dict(out)
+            out["boxes"] = unletterbox_boxes(
+                out["boxes"], orig_shape, scale, pad_left, pad_top,
+            )
             results.append(_FasterRCNNResult(orig_shape, out))
         return results
 
@@ -522,6 +561,66 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         return True
 
     # ── benchmark overrides ───────────────────────────────────────────
+
+    @staticmethod
+    def _copy_benchmark_output_to_host(value):
+        """Force detection outputs back to host memory before stopping the timer."""
+        if isinstance(value, torch.Tensor):
+            return value.cpu()
+        if isinstance(value, dict):
+            return {key: FasterRCNNTrainer._copy_benchmark_output_to_host(item)
+                    for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return type(value)(
+                FasterRCNNTrainer._copy_benchmark_output_to_host(item)
+                for item in value
+            )
+        return value
+
+    def _measure_end_to_end(
+        self,
+        model: nn.Module,
+        images,
+        device,
+        warmup_iters: int = 50,
+        measure_iters: int = 200,
+    ) -> Tuple[float, float, List[float]]:
+        """Measure real-image preprocessing + Faster R-CNN inference pipeline."""
+        image_paths = sorted(
+            path
+            for path in Path(images).rglob("*")
+            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        )
+        if not image_paths:
+            raise ValueError(f"未找到 benchmark 图像: {images}")
+
+        device = torch.device(device)
+        input_size = self._input_size()
+        model.to(device).eval()
+
+        def pipeline(path: Path):
+            with Image.open(path) as pil_image:
+                image = TF.to_tensor(pil_image.convert("RGB"))
+            image, _, _, _ = letterbox_image(image, input_size)
+            outputs = model([image.to(device)])
+            self._copy_benchmark_output_to_host(outputs)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+
+        with torch.no_grad():
+            for index in range(warmup_iters):
+                pipeline(image_paths[index % len(image_paths)])
+
+            latencies: List[float] = []
+            for index in range(measure_iters):
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                start = time.perf_counter()
+                pipeline(image_paths[index % len(image_paths)])
+                latencies.append((time.perf_counter() - start) * 1000.0)
+
+        latency_ms = float(np.mean(latencies))
+        return 1000.0 / latency_ms, latency_ms, latencies
 
     def _run_model_benchmark(self, model_or_predictor) -> Optional[dict]:
         try:
@@ -540,6 +639,17 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
                 model_name=model_name,
                 includes_nms=True,
             )
+            try:
+                e2e_fps, e2e_latency, e2e_latencies = self._measure_end_to_end(
+                    raw_model,
+                    self._benchmark_image_dir(str(self.data_config.get("data_yaml", ""))),
+                    self.misc_config.get("device", "cuda"),
+                )
+                result.end_to_end_fps = e2e_fps
+                result.end_to_end_latency_ms = e2e_latency
+                result.end_to_end_latencies_ms = e2e_latencies
+            except Exception as exc:
+                self.logger.warning(f"Faster R-CNN 端到端 benchmark 失败（保留模型推理指标）: {exc}")
             log_benchmark(self.logger.info, result, header=model_name)
             return benchmark_to_dict(result)
         except Exception as exc:
@@ -553,6 +663,51 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         if model is None:
             return None
         return self._run_model_benchmark(model)
+
+    def run_tensorrt_benchmark(self) -> None:
+        """Export the completed Faster R-CNN run and record TensorRT results."""
+        enabled = os.environ.get(
+            "YOLO_TRT_BENCHMARK", os.environ.get("TRT_BENCHMARK", "1")
+        )
+        if enabled == "0":
+            self.logger.info("TensorRT benchmark 已通过环境变量关闭")
+            return
+
+        weights = self._tensorrt_weights_path()
+        if weights is None:
+            raise FileNotFoundError(f"无可用于 TensorRT benchmark 的权重: {self.log_dir}")
+
+        data_yaml = str(self.data_config.get("data_yaml", ""))
+        data_lower = data_yaml.lower()
+        if "dair" in data_lower:
+            dataset = "DAIR-V2X"
+        elif "uadetrac" in data_lower or "ua-detrac" in data_lower:
+            dataset = "UA-DETRAC"
+        else:
+            dataset = Path(data_yaml).stem or "unknown"
+
+        model_name = str(self.model_config.get("model_name", "fasterrcnn_resnet50_fpn"))
+        command = [
+            sys.executable,
+            str(_yolo_dir / "tools" / "benchmark_fasterrcnn_trt.py"),
+            "--weights", str(weights.resolve()),
+            "--output-dir", str(self.log_dir.resolve()),
+            "--images", str(self._benchmark_image_dir(data_yaml)),
+            "--num-classes", str(self.num_classes),
+            "--run-id", self.log_dir.name,
+            "--model", model_name,
+            "--dataset", dataset,
+            "--seed", str(self.training_config.get("seed", 0)),
+            "--imgsz", str(self._input_size()),
+            "--warmup", os.environ.get("TRT_WARMUP", "100"),
+            "--iterations", os.environ.get("TRT_ITERATIONS", "1000"),
+        ]
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        self.logger.info("🚀 运行 Faster R-CNN TensorRT benchmark: %s", model_name)
+        subprocess.run(command, cwd=_yolo_dir, check=True)
+        self.logger.info("✓ TensorRT benchmark 已写入统一总表")
 
     # ── file-naming override (weights are state_dict, not Ultralytics) ─
 

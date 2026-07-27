@@ -19,6 +19,43 @@ from torch.utils.data import Dataset
 import torchvision.transforms.functional as F
 
 
+def letterbox_image(
+    image: torch.Tensor, size: int
+) -> Tuple[torch.Tensor, float, int, int]:
+    """Resize an image into a square canvas while preserving its aspect ratio."""
+    height, width = image.shape[-2:]
+    scale = min(size / height, size / width)
+    resized_height = round(height * scale)
+    resized_width = round(width * scale)
+    image = F.resize(image, [resized_height, resized_width])
+
+    pad_left = (size - resized_width) // 2
+    pad_top = (size - resized_height) // 2
+    image = F.pad(
+        image,
+        [pad_left, pad_top, size - resized_width - pad_left, size - resized_height - pad_top],
+        fill=114.0 / 255.0,
+    )
+    return image, scale, pad_left, pad_top
+
+
+def unletterbox_boxes(
+    boxes: torch.Tensor,
+    original_size: Tuple[int, int],
+    scale: float,
+    pad_left: int,
+    pad_top: int,
+) -> torch.Tensor:
+    """Map boxes predicted on a letterboxed image back to original coordinates."""
+    height, width = original_size
+    boxes = boxes.clone()
+    boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_left) / scale
+    boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_top) / scale
+    boxes[:, [0, 2]].clamp_(0, width)
+    boxes[:, [1, 3]].clamp_(0, height)
+    return boxes
+
+
 class YOLOFormatDetectionDataset(Dataset):
     """从 YOLO 格式目录加载图像和标注，输出 torchvision detection 所需格式。"""
 
@@ -110,6 +147,39 @@ class RandomHorizontalFlipDetection:
                 boxes[:, 0] = w - boxes[:, 2]
                 boxes[:, 2] = w - x1
                 target["boxes"] = boxes
+        return image, target
+
+
+class LetterboxDetection:
+    """Apply fixed square letterbox preprocessing to an image and its boxes."""
+
+    def __init__(self, size: int):
+        self.size = size
+
+    def __call__(
+        self, image: torch.Tensor, target: Dict[str, Any]
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        image, scale, pad_left, pad_top = letterbox_image(image, self.size)
+        boxes = target["boxes"]
+        if boxes.numel() > 0:
+            boxes = boxes.clone()
+            boxes[:, [0, 2]] = boxes[:, [0, 2]] * scale + pad_left
+            boxes[:, [1, 3]] = boxes[:, [1, 3]] * scale + pad_top
+            target["boxes"] = boxes
+        return image, target
+
+
+class DetectionCompose:
+    """Compose detection transforms that update both image and target."""
+
+    def __init__(self, transforms: List[Callable]):
+        self.transforms = transforms
+
+    def __call__(
+        self, image: torch.Tensor, target: Dict[str, Any]
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        for transform in self.transforms:
+            image, target = transform(image, target)
         return image, target
 
 
