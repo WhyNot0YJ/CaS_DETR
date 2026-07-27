@@ -33,9 +33,19 @@ __all__ = [
 ]
 
 
+def _set_worker_threads(threads, worker_id):
+    torch.set_num_threads(threads)
+
+
 @register()
 class DataLoader(data.DataLoader):
     __inject__ = ['dataset', 'collate_fn']
+
+    def __init__(self, *args, worker_cpu_threads=1, **kwargs):
+        num_workers = kwargs.get('num_workers', 0)
+        if num_workers > 0 and kwargs.get('worker_init_fn') is None:
+            kwargs['worker_init_fn'] = partial(_set_worker_threads, worker_cpu_threads)
+        super().__init__(*args, **kwargs)
 
     def __repr__(self) -> str:
         format_string = self.__class__.__name__ + "("
@@ -111,6 +121,7 @@ class BatchImageCollateFunction(BaseCollateFunction):
         vis_save='./vis_dataset/',
         scale_low_ratio=None,
         scale_high_ratio=None,
+        gpu_augment=False,
     ) -> None:
         super().__init__()
         self.base_size = base_size
@@ -124,6 +135,7 @@ class BatchImageCollateFunction(BaseCollateFunction):
         self.ema_restart_decay = ema_restart_decay
         # FIXME Mixup
         self.mixup_prob, self.mixup_epochs = mixup_prob, mixup_epochs
+        self.gpu_augment = gpu_augment
         if self.mixup_prob > 0:
             self.data_vis, self.vis_save = data_vis, vis_save
             os.makedirs(self.vis_save, exist_ok=True) if self.data_vis else None
@@ -171,7 +183,8 @@ class BatchImageCollateFunction(BaseCollateFunction):
                 # Add mixup ratio to targets
                 updated_targets[i]['mixup'] = torch.tensor(
                     [beta] * len(targets[i]['labels']) + [1.0 - beta] * len(shifted_targets[i]['labels']), 
-                    dtype=torch.float32
+                    dtype=torch.float32,
+                    device=images.device
                     )
             targets = updated_targets
 
@@ -190,23 +203,24 @@ class BatchImageCollateFunction(BaseCollateFunction):
 
         return images, targets
 
-    def __call__(self, items):
-        images = torch.cat([x[0][None] for x in items], dim=0)
-        targets = [x[1] for x in items]
-
-        # Mixup
+    def apply_batch_augment(self, images, targets):
         images, targets = self.apply_mixup(images, targets)
 
         if self.scales is not None and self.epoch < self.stop_epoch:
-            # sz = random.choice(self.scales)
-            # sz = [sz] if isinstance(sz, int) else list(sz)
-            # VF.resize(inpt, sz, interpolation=self.interpolation)
-
             sz = random.choice(self.scales)
             images = F.interpolate(images, size=sz)
             if 'masks' in targets[0]:
                 for tg in targets:
                     tg['masks'] = F.interpolate(tg['masks'], size=sz, mode='nearest')
                 raise NotImplementedError('')
+
+        return images, targets
+
+    def __call__(self, items):
+        images = torch.cat([x[0][None] for x in items], dim=0)
+        targets = [x[1] for x in items]
+
+        if not self.gpu_augment:
+            images, targets = self.apply_batch_augment(images, targets)
 
         return images, targets

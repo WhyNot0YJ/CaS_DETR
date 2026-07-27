@@ -65,8 +65,11 @@ def train_one_epoch(
         if global_step < num_visualization_sample_batch and output_dir is not None and dist_utils.is_main_process():
             save_samples(samples, targets, output_dir, "train", normalized=True, box_fmt="cxcywh")
 
-        samples = samples.to(device)
-        targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+        samples = samples.to(device, non_blocking=True)
+        targets = [{k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+        batch_augment = getattr(data_loader, 'collate_fn', None)
+        if getattr(batch_augment, 'gpu_augment', False):
+            samples, targets = batch_augment.apply_batch_augment(samples, targets)
 
         if scaler is not None:
             with torch.autocast(device_type=str(device), cache_enabled=True):
@@ -187,8 +190,8 @@ def evaluate(
         if global_step < num_visualization_sample_batch and output_dir is not None and dist_utils.is_main_process():
             save_samples(samples, targets, output_dir, "val", normalized=False, box_fmt="xyxy")
 
-        samples = samples.to(device)
-        targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+        samples = samples.to(device, non_blocking=True)
+        targets = [{k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
 
         outputs = model(samples)
         # with torch.autocast(device_type=str(device)):

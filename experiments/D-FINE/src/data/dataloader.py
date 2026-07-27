@@ -28,9 +28,18 @@ __all__ = [
 ]
 
 
+def _set_worker_threads(threads, worker_id):
+    torch.set_num_threads(threads)
+
+
 @register()
 class DataLoader(data.DataLoader):
     __inject__ = ["dataset", "collate_fn"]
+
+    def __init__(self, *args, worker_cpu_threads=1, **kwargs):
+        if kwargs.get('num_workers', 0) > 0 and kwargs.get('worker_init_fn') is None:
+            kwargs['worker_init_fn'] = partial(_set_worker_threads, worker_cpu_threads)
+        super().__init__(*args, **kwargs)
 
     def __repr__(self) -> str:
         format_string = self.__class__.__name__ + "("
@@ -100,6 +109,7 @@ class BatchImageCollateFunction(BaseCollateFunction):
         base_size_repeat=None,
         scale_low_ratio=None,
         scale_high_ratio=None,
+        gpu_augment=False,
     ) -> None:
         super().__init__()
         self.base_size = base_size
@@ -111,12 +121,10 @@ class BatchImageCollateFunction(BaseCollateFunction):
             self.scales = None
         self.stop_epoch = stop_epoch if stop_epoch is not None else 100000000
         self.ema_restart_decay = ema_restart_decay
+        self.gpu_augment = gpu_augment
         # self.interpolation = interpolation
 
-    def __call__(self, items):
-        images = torch.cat([x[0][None] for x in items], dim=0)
-        targets = [x[1] for x in items]
-
+    def apply_batch_augment(self, images, targets):
         if self.scales is not None and self.epoch < self.stop_epoch:
             # sz = random.choice(self.scales)
             # sz = [sz] if isinstance(sz, int) else list(sz)
@@ -129,4 +137,11 @@ class BatchImageCollateFunction(BaseCollateFunction):
                     tg["masks"] = F.interpolate(tg["masks"], size=sz, mode="nearest")
                 raise NotImplementedError("")
 
+        return images, targets
+
+    def __call__(self, items):
+        images = torch.cat([x[0][None] for x in items], dim=0)
+        targets = [x[1] for x in items]
+        if not self.gpu_augment:
+            images, targets = self.apply_batch_augment(images, targets)
         return images, targets

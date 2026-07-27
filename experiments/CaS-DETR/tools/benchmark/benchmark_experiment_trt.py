@@ -8,6 +8,43 @@ import sys
 from pathlib import Path
 
 
+def sync_fps_to_eval_metrics(eval_csv: Path, run_id: str, run_rows: dict) -> int:
+    """Copy the TensorRT model and pipeline measurements into matching eval rows."""
+    if not eval_csv.is_file():
+        return 0
+
+    model = run_rows.get("model")
+    end_to_end = run_rows.get("end-to-end")
+    if not model or not end_to_end:
+        raise RuntimeError(f"missing TensorRT benchmark rows for run_id={run_id}")
+
+    with eval_csv.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fields = list(reader.fieldnames or [])
+        rows = list(reader)
+    updates = {
+        "Inference_FPS": f"{float(model['fps']):.2f}",
+        "Inference_Latency_ms": f"{float(model['mean_latency_ms']):.2f}",
+        "EndToEnd_FPS": f"{float(end_to_end['fps']):.2f}",
+        "EndToEnd_Latency_ms": f"{float(end_to_end['mean_latency_ms']):.2f}",
+    }
+    for field in updates:
+        if field not in fields:
+            fields.append(field)
+
+    count = 0
+    for row in rows:
+        if row.get("run_id") == run_id:
+            row.update(updates)
+            count += 1
+    if count:
+        with eval_csv.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+    return count
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--framework", choices=("casdeim", "deim", "dfine", "rtdetr"), required=True)
@@ -15,6 +52,7 @@ def parse_args():
     p.add_argument("--checkpoint", type=Path, required=True)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--model", required=True)
+    p.add_argument("--run-id", default="")
     p.add_argument("--images", type=Path, required=True)
     p.add_argument("--trtexec", default="trtexec")
     p.add_argument("--warmup", type=int, default=100)
@@ -24,32 +62,36 @@ def parse_args():
 
 def main():
     args = parse_args()
-    root = Path(__file__).resolve().parents[3]
-    deploy = root / "CaS-DETR" / "tools" / "deployment"
-    benchmark = root / "CaS-DETR" / "tools" / "benchmark"
+    experiments_dir = Path(__file__).resolve().parents[3]
+    deploy = experiments_dir / "CaS-DETR" / "tools" / "deployment"
+    benchmark = experiments_dir / "CaS-DETR" / "tools" / "benchmark"
     trt_dir = args.output_dir / "tensorrt"
     onnx = trt_dir / f"{args.model}.onnx"
     engine = trt_dir / f"{args.model}.engine"
     build_log = trt_dir / f"{args.model}.build.log"
-    benchmark_csv = root / "reports" / "benchmark.csv"
+    benchmark_csv = experiments_dir / "reports" / "benchmark.csv"
+    eval_csv = experiments_dir / "reports" / "eval_metrics.csv"
+    run_id = args.run_id or args.output_dir.name
     commands = [
         [sys.executable, str(deploy / "export_onnx_protocol.py"), "--framework", args.framework,
          "--config", str(args.config), "--checkpoint", str(args.checkpoint), "--output", str(onnx)],
         [sys.executable, str(deploy / "build_trt_engine.py"), "--onnx", str(onnx),
          "--engine", str(engine), "--log", str(build_log), "--trtexec", args.trtexec],
         [sys.executable, str(benchmark / "benchmark_trt_protocol.py"), "--engine", str(engine),
-         "--model", args.model, "--output-csv", str(benchmark_csv), "--run-id", args.output_dir.name,
+         "--model", args.model, "--output-csv", str(benchmark_csv), "--run-id", run_id,
          "--framework", args.framework, "--images", str(args.images), "--warmup", str(args.warmup),
          "--iterations", str(args.iterations)],
     ]
     for command in commands:
-        subprocess.run(command, cwd=root, check=True)
+        subprocess.run(command, cwd=experiments_dir, check=True)
     with benchmark_csv.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-    run_id = args.output_dir.name
     run_rows = {
         row["mode"]: row for row in rows if row.get("run_id") == run_id
     }
+    updated_rows = sync_fps_to_eval_metrics(eval_csv, run_id, run_rows)
+    if not updated_rows:
+        print(f"[TensorRT] no eval_metrics rows matched run_id={run_id}", flush=True)
     print(
         f"[TensorRT] {args.model}: model={float(run_rows['model']['fps']):.2f} FPS, "
         f"end-to-end={float(run_rows['end-to-end']['fps']):.2f} FPS",

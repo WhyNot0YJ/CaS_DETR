@@ -2,6 +2,7 @@
 
 # 解决 32G 环境下 Dataloader 多进程与 OpenMP 线程池冲突导致的 libgomp 报错
 export OMP_NUM_THREADS=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # TensorRT 收尾 benchmark 默认开启；可设 TRT_BENCHMARK=0 关闭。
 TRT_BENCHMARK="${TRT_BENCHMARK:-1}"
@@ -1556,13 +1557,24 @@ run_single_experiment() {
             pretrained_arg="-t ${DFINE_TUNING_CKPT}"
         fi
 
-        # DQM-DETR 训练显存紧张，开启 expandable_segments 回收碎片
-        if [[ "$WORK_DIR" == "DQM-DETR" ]]; then
-            export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+        local resume_arg=""
+        local model_output_rel
+        model_output_rel=$("$PYTHON_BIN" -c 'import sys,yaml; print((yaml.safe_load(open(sys.argv[1])) or {}).get("output_dir", ""))' "$yml_rel")
+        if [ -n "$model_output_rel" ] && [ -f "$model_output_rel/last.pth" ]; then
+            resume_arg="-r $model_output_rel/last.pth"
+            pretrained_arg=""
+            log_info "检测到 checkpoint，恢复训练: $model_output_rel/last.pth"
         fi
 
         if [ "$TEST_MODE" = true ]; then
-            "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg -u epoches=2
+            if [ -n "$resume_arg" ]; then
+                "$PYTHON_BIN" train.py -c "$yml_rel" $resume_arg -u tuning=null epoches=2
+            else
+                "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg -u epoches=2
+            fi
+        elif [ -n "$resume_arg" ]; then
+            "$PYTHON_BIN" train.py -c "$yml_rel" $resume_arg -u tuning=null
         else
             "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg
         fi
@@ -1577,8 +1589,6 @@ run_single_experiment() {
                 --config "$config_path" \
                 --model-name "$exp_name" \
                 --device cuda 2>&1 || log_warning "CaS 评估失败（不影响训练结果）"
-            local model_output_rel
-            model_output_rel=$("$PYTHON_BIN" -c 'import sys,yaml; print((yaml.safe_load(open(sys.argv[1])) or {}).get("output_dir", ""))' "$yml_rel")
             if [ -n "$model_output_rel" ]; then
                 run_trt_benchmark_for_eval "$fw_flag" "$config_path" "$WORK_DIR/${model_output_rel#./}" "$exp_name"
             fi

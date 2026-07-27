@@ -52,7 +52,7 @@ DQMDFINECriterion:
 
 train_dataloader:
   total_batch_size: 16
-  num_workers: 8
+  num_workers: 12
   dataset:
     transforms:
       policy:
@@ -74,7 +74,7 @@ train_dataloader:
 
 val_dataloader:
   total_batch_size: 32
-  num_workers: 8
+  num_workers: 12
 
 vis_after_train: True
 vis_num_images: 8

@@ -61,12 +61,12 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
                 'clean': batch['clean'].to(device),
                 'degraded': batch['degraded'].to(device),
             }
-            targets = [{k: v.to(device) for k, v in t.items()} for t in batch['targets']]
+            targets = [{k: v.to(device, non_blocking=True) if torch.is_tensor(v) else v for k, v in t.items()} for t in batch['targets']]
             paired_batch = True
         else:
             samples, targets = batch
-            samples = samples.to(device)
-            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+            samples = samples.to(device, non_blocking=True)
+            targets = [{k: v.to(device, non_blocking=True) if torch.is_tensor(v) else v for k, v in t.items()} for t in targets]
             paired_batch = False
         global_step = epoch * len(data_loader) + i
         metas = dict(epoch=epoch, step=i, global_step=global_step, epoch_step=len(data_loader))
@@ -182,8 +182,8 @@ def evaluate(model: torch.nn.Module, criterion: torch.nn.Module, postprocessor, 
     # coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
 
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
-        samples = samples.to(device)
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        samples = samples.to(device, non_blocking=True)
+        targets = [{k: v.to(device, non_blocking=True) if torch.is_tensor(v) else v for k, v in t.items()} for t in targets]
 
         outputs = model(samples)
 
