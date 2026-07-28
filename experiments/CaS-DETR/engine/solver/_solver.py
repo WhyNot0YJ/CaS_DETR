@@ -8,6 +8,7 @@ import atexit
 
 from ..misc import dist_utils
 from ..core import BaseConfig
+from .moe_ffn_init import load_structured_moe_ffn_init
 
 
 def to(m: nn.Module, device: str):
@@ -50,6 +51,15 @@ class BaseSolver(object):
         if self.cfg.tuning:
             print(f'Tuning checkpoint from {self.cfg.tuning}')
             self.load_tuning_state(self.cfg.tuning)
+
+        moe_ffn_init = self.cfg.yaml_cfg.get('moe_ffn_init')
+        if moe_ffn_init:
+            report = load_structured_moe_ffn_init(
+                self.model,
+                source=moe_ffn_init['source'],
+                root=Path(__file__).resolve().parents[2],
+            )
+            print(f'Load structured MoE FFN initialization, {report}')
 
         self.model = dist_utils.warp_model(
             self.model.to(device), sync_bn=cfg.sync_bn, find_unused_parameters=cfg.find_unused_parameters

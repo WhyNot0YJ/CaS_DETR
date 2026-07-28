@@ -40,6 +40,7 @@ TRTEXEC="${TRTEXEC:-trtexec}"
 #   ./run_batch_experiments.sh --cas_moe4_base03_a10_fixed_keep  # 同上别名
 #   ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 总参数量扫描：固定 experts=4/top_k=2，扫 0.5x/1x/2x/4x（DAIR-V2X）
 #   ./run_batch_experiments.sh --cas_moe_expert_scan           # MoE 专家数扫描：固定 top_k=2/dim_ff=128，扫 experts=3/4/6（DAIR-V2X）
+#   ./run_batch_experiments.sh --cas_moe_ffn_init              # 0.5x/1x/2x/4x MoE 使用训练后 4x FFN 初始化
 #   ./run_batch_experiments.sh --yolov5                        # 只运行YOLOv5实验
 #   ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8实验
 #   ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12实验
@@ -338,6 +339,14 @@ declare -a CAS_MOE_EXPERT_SCAN_EXPERIMENTS=(
     "CaS-DETR/configs/dataset/ablation/cas_deim_moe3_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
     "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
     "CaS-DETR/configs/dataset/ablation/cas_deim_moe6_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+)
+
+# 只改变 MoE FFN 初始化；现有四容量配置分别作为随机 FFN 对照。
+declare -a CAS_MOE_FFN_INIT_EXPERIMENTS=(
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap1x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap2x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap4x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
 )
 
 # 快速打包：base03_a10 moe4 主线（不含 keep*_fixed；固定 keep 见 CAS_FIXED_KEEP_RATIO_EXPERIMENTS）
@@ -868,6 +877,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
     local has_cas_fixed_keep_ratio=false
     local has_cas_moe_capacity_scan=false
     local has_cas_moe_expert_scan=false
+    local has_cas_moe_ffn_init=false
     local has_yolov5=false
     local has_yolov8=false
     local has_yolov12=false
@@ -925,6 +935,9 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
             --cas_moe_expert_scan|--cas-moe-expert-scan|--cas_moe_num_experts_scan|--cas-moe-num-experts-scan)
                 has_cas_moe_expert_scan=true
                 ;;
+            --cas_moe_ffn_init|--cas-moe-ffn-init)
+                has_cas_moe_ffn_init=true
+                ;;
             --yolov5)
                 has_yolov5=true
                 ;;
@@ -959,7 +972,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_cas_moe_expert_scan" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_cas_moe_expert_scan" = true ] || [ "$has_cas_moe_ffn_init" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
@@ -976,6 +989,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         [ "$has_cas_fixed_keep_ratio" = true ] && selected_types+=("CaS_DETR_FIXED_keep_ratio")
         [ "$has_cas_moe_capacity_scan" = true ] && selected_types+=("CaS_DETR_MOE_CAPACITY_SCAN")
         [ "$has_cas_moe_expert_scan" = true ] && selected_types+=("CaS_DETR_MOE_EXPERT_SCAN")
+        [ "$has_cas_moe_ffn_init" = true ] && selected_types+=("CaS_DETR_MOE_FFN_INIT")
         [ "$has_yolov5" = true ] && selected_types+=("YOLOv5")
         [ "$has_yolov8" = true ] && selected_types+=("YOLOv8")
         [ "$has_yolov12" = true ] && selected_types+=("YOLOv12")
@@ -1118,6 +1132,15 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
                 if [ "$has_cas_moe_capacity_scan" = true ] && [[ "$_p" == *"moe4_cap05x"* ]]; then
                     continue
                 fi
+                if filter_config "$_p"; then
+                    CONFIGS_TO_RUN+=("$_p")
+                fi
+            done
+        fi
+
+        if [ "$has_cas_moe_ffn_init" = true ]; then
+            local _p
+            for _p in "${CAS_MOE_FFN_INIT_EXPERIMENTS[@]}"; do
                 if filter_config "$_p"; then
                     CONFIGS_TO_RUN+=("$_p")
                 fi
@@ -1319,6 +1342,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         echo "  ./run_batch_experiments.sh --cas_fixed_keep_ratio          # 仅 DAIR：moe4 base03_a10 keep0.3、0.7 固定（独立入口）"
         echo "  ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 容量扫描：0.5x/1x/2x/4x（experts=4、top_k=2，仅 DAIR）"
         echo "  ./run_batch_experiments.sh --cas_moe_expert_scan           # MoE 专家数扫描：3/4/6（dim_ff=128、top_k=2，仅 DAIR）"
+        echo "  ./run_batch_experiments.sh --cas_moe_ffn_init              # 0.5x/1x/2x/4x MoE 的 4x FFN 初始化"
         echo "  ./run_batch_experiments.sh --yolov5                        # 只运行YOLOv5"
         echo "  ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8"
         echo "  ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12"
