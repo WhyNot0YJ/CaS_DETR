@@ -4,7 +4,7 @@ set -e
 VERSION="8"
 DATASET="dairv2x"
 DATASET_REGISTRY="configs/datasets.yaml"
-CHECKPOINT="logs/*/weights/best.pt"
+CHECKPOINT="auto"
 IMAGE_DIR=""
 OUTPUT_DIR=""
 CONF="0.5"

@@ -8,8 +8,8 @@ training:
   batch_size: 16
 
 data:
-  data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO/dairv2x.yaml"
-  coco_data_root: "/root/autodl-fs/datasets/DAIR-V2X"
+  data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO_Vehicle5/dairv2x_vehicle5.yaml"
+  coco_data_root: "/root/autodl-fs/datasets/DAIR-V2X-Vehicle5"
 
 checkpoint:
   log_dir: "logs"

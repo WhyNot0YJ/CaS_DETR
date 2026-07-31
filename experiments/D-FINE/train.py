@@ -18,6 +18,7 @@ import argparse
 from src.core import YAMLConfig, yaml_utils
 from src.misc import dist_utils
 from src.solver import TASKS
+from common.dataset_protocol import apply_detr_protocol_overrides
 from pprint import pprint
 
 debug = False
@@ -68,11 +69,12 @@ def main(args) -> None:
             k: v
             for k, v in args.__dict__.items()
             if k
-            not in [
-                "update",
-            ]
+            not in ["update", "dataset_protocol"]
             and v is not None
         }
+    )
+    apply_detr_protocol_overrides(
+        update_dict, args.config, args.dataset_protocol
     )
 
     cfg = YAMLConfig(args.config, **update_dict)
@@ -124,6 +126,11 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
     )
+    protocol = parser.add_mutually_exclusive_group()
+    protocol.add_argument("--dairv2x-vehicle5", dest="dataset_protocol", action="store_const", const="dairv2x_vehicle5")
+    protocol.add_argument("--dairv2x-vehicle8", dest="dataset_protocol", action="store_const", const="dairv2x_vehicle8")
+    protocol.add_argument("--uadetrac-vehicle1", dest="dataset_protocol", action="store_const", const="uadetrac_vehicle1")
+    protocol.add_argument("--uadetrac-vehicle4", dest="dataset_protocol", action="store_const", const="uadetrac_vehicle4")
 
     # priority 1
     parser.add_argument("-u", "--update", nargs="+", help="update yaml config")

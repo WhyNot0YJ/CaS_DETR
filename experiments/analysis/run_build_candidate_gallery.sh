@@ -18,18 +18,18 @@ cd "${ROOT_DIR}"
 
 # --- Ours (CaS-DETR full) checkpoint ---
 CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
-RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
+RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # --- Baseline (all-off) checkpoint ---
 BASELINE_CONFIG_A="${BASELINE_CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_dairv2x.yml}"
-BASELINE_RESUME_A="${BASELINE_RESUME_A:-experiments/CaS-DETR/outputs/ablation/cas_deim_all_off_hgnetv2_s_dairv2x/best_stg2.pth}"
+BASELINE_RESUME_A="${BASELINE_RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_all_off_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # --- Test set annotation + image root ---
 # DAIR-V2X test json: file_name like 'image/000056.jpg'; image_root should
 # contain 'image/' as a subdir, so strip_prefix is empty and image_root is the
 # dataset base.
-DAIRV2X_ANN="${DAIRV2X_ANN:-/root/autodl-fs/datasets/DAIR-V2X/annotations/instances_test.json}"
-DAIRV2X_IMG_ROOT="${DAIRV2X_IMG_ROOT:-/root/autodl-fs/datasets/DAIR-V2X}"
+DAIRV2X_ANN="${DAIRV2X_ANN:-/root/autodl-fs/datasets/DAIR-V2X-Vehicle5/annotations/instances_test.json}"
+DAIRV2X_IMG_ROOT="${DAIRV2X_IMG_ROOT:-/root/autodl-fs/datasets/DAIR-V2X-Vehicle5}"
 DAIRV2X_STRIP_PREFIX="${DAIRV2X_STRIP_PREFIX:-}"
 
 # --- Sampling + inference options ---
@@ -47,11 +47,11 @@ FIG_WIDTH="${FIG_WIDTH:-14}"
 ROW_HEIGHT="${ROW_HEIGHT:-1.9}"
 DPI="${DPI:-120}"
 
-OUT_DIR="${OUT_DIR:-experiments/analysis/gallery}"
+OUT_DIR="${OUT_DIR:-experiments/analysis/figures/dairv2x_vehicle5}"
 mkdir -p "${OUT_DIR}"
 
-OUTPUT_DAIRV2X="${OUTPUT_DAIRV2X:-${OUT_DIR}/gallery_dairv2x.pdf}"
-INDEX_DAIRV2X="${INDEX_DAIRV2X:-${OUT_DIR}/gallery_dairv2x_index.json}"
+OUTPUT_DAIRV2X="${OUTPUT_DAIRV2X:-${OUT_DIR}/gallery_dairv2x_vehicle5.pdf}"
+INDEX_DAIRV2X="${INDEX_DAIRV2X:-${OUT_DIR}/gallery_dairv2x_vehicle5_index.json}"
 
 # --- Sanity check files exist ---
 for f in "${CONFIG_A}" "${RESUME_A}" \
@@ -131,7 +131,7 @@ run_gallery() {
 }
 
 run_gallery \
-  "DAIR-V2X" \
+  "DAIR-V2X Vehicle5" \
   "${CONFIG_A}" "${RESUME_A}" \
   "${BASELINE_CONFIG_A}" "${BASELINE_RESUME_A}" \
   "${EVAL_EPOCH_A}" "${BASELINE_EVAL_EPOCH_A}" \
@@ -140,7 +140,7 @@ run_gallery \
 
 echo ""
 echo "Done."
-echo "  DAIR-V2X gallery: ${OUTPUT_DAIRV2X}"
+echo "  DAIR-V2X Vehicle5 gallery: ${OUTPUT_DAIRV2X}"
 echo ""
 echo "Next step: scan the PDF, pick good cases, then update the image rows in"
 echo "experiments/analysis/run_visualize_dual_aperture_dual_ckpt.sh"

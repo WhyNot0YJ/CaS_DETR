@@ -1,0 +1,6 @@
+__include__: [
+  './rtdetrv2_r18vd_100e_dairv2x.yml',
+  '../dataset/dairv2x_vehicle5_detection.yml',
+]
+
+output_dir: ./output/rtdetrv2_r18vd_100e_dairv2x_vehicle5

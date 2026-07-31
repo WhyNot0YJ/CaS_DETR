@@ -312,12 +312,22 @@ def main() -> None:
     parser.add_argument(
         "--output_json",
         type=str,
-        default=str(Path(__file__).parent / "benchmark_pruning_curve_results.json"),
+        default=str(
+            Path(__file__).parent
+            / "figures"
+            / os.environ.get("EXPERIMENT_DATASET_PROTOCOL", "dairv2x_vehicle5")
+            / f"benchmark_pruning_curve_{os.environ.get('EXPERIMENT_DATASET_PROTOCOL', 'dairv2x_vehicle5')}.json"
+        ),
     )
     parser.add_argument(
         "--output_plot",
         type=str,
-        default=str(Path(__file__).parent / "pruning_tradeoff.pdf"),
+        default=str(
+            Path(__file__).parent
+            / "figures"
+            / os.environ.get("EXPERIMENT_DATASET_PROTOCOL", "dairv2x_vehicle5")
+            / f"pruning_tradeoff_{os.environ.get('EXPERIMENT_DATASET_PROTOCOL', 'dairv2x_vehicle5')}.pdf"
+        ),
     )
     parser.add_argument("--inference_ratios", nargs="+", type=float, default=_default_ratios())
     parser.add_argument("--config_a", type=str, default=None)

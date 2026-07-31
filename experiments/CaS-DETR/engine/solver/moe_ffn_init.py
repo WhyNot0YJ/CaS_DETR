@@ -18,8 +18,8 @@ def load_structured_moe_ffn_init(
     model: nn.Module,
     source: str,
     root: Path,
-) -> Dict[str, int]:
-    """Compress trained wide MoE FFNs into the current model by neuron saliency."""
+) -> Dict[str, object]:
+    """Upcycle dense FFNs or compress wide MoE FFNs by neuron saliency."""
     source_path = Path(source).expanduser()
     if not source_path.is_absolute():
         source_path = (root / source_path).resolve()
@@ -37,26 +37,68 @@ def load_structured_moe_ffn_init(
 
     loaded_tensors = 0
     selected_neurons = 0
+    source_types = set()
     for w1_key in w1_keys:
         prefix = w1_key[:-len('expert_w1')]
         b1_key = prefix + 'expert_b1'
         w2_key = prefix + 'expert_w2'
         b2_key = prefix + 'expert_b2'
         keys = (w1_key, b1_key, w2_key, b2_key)
-        missing = [key for key in keys if key not in source_state]
-        if missing:
-            raise KeyError(f'Missing source MoE FFN tensors: {missing}')
-
-        source_w1 = source_state[w1_key]
-        source_b1 = source_state[b1_key]
-        source_w2 = source_state[w2_key]
-        source_b2 = source_state[b2_key]
         target_w1 = target_state[w1_key]
         target_b1 = target_state[b1_key]
         target_w2 = target_state[w2_key]
         target_b2 = target_state[b2_key]
-
         experts, target_hidden, d_model = target_w1.shape
+
+        if all(key in source_state for key in keys):
+            source_types.add('moe')
+            source_w1 = source_state[w1_key]
+            source_b1 = source_state[b1_key]
+            source_w2 = source_state[w2_key]
+            source_b2 = source_state[b2_key]
+        else:
+            source_types.add('dense')
+            layer_prefix = prefix[:-len('decoder_moe_layer.')]
+            dense_keys = (
+                layer_prefix + 'linear1.weight',
+                layer_prefix + 'linear1.bias',
+                layer_prefix + 'linear2.weight',
+                layer_prefix + 'linear2.bias',
+            )
+            missing = [key for key in dense_keys if key not in source_state]
+            if missing:
+                raise KeyError(
+                    f'Missing source MoE or dense FFN tensors for {prefix}: {missing}'
+                )
+            dense_w1, dense_b1, dense_w2, dense_b2 = (
+                source_state[key] for key in dense_keys
+            )
+            source_hidden = dense_w1.shape[0]
+            expected_shapes = (
+                (source_hidden, d_model),
+                (source_hidden,),
+                (d_model, source_hidden),
+                (d_model,),
+            )
+            actual_shapes = tuple(
+                tuple(tensor.shape)
+                for tensor in (dense_w1, dense_b1, dense_w2, dense_b2)
+            )
+            if actual_shapes != expected_shapes or source_hidden < target_hidden:
+                raise ValueError(
+                    f'Invalid source dense FFN shapes for {prefix}: '
+                    f'expected {expected_shapes}, got {actual_shapes}'
+                )
+            scores = dense_w1.float().norm(dim=1) * dense_w2.float().norm(dim=0)
+            indices = scores.argsort(descending=True, stable=True)[:target_hidden]
+            target_w1.copy_(dense_w1[indices].unsqueeze(0).expand(experts, -1, -1))
+            target_b1.copy_(dense_b1[indices].unsqueeze(0).expand(experts, -1))
+            target_w2.copy_(dense_w2[:, indices].unsqueeze(0).expand(experts, -1, -1))
+            target_b2.copy_(dense_b2.unsqueeze(0).expand(experts, -1))
+            loaded_tensors += len(keys)
+            selected_neurons += experts * target_hidden
+            continue
+
         expected_source = (experts, source_w1.shape[1], d_model)
         if tuple(source_w1.shape) != expected_source or source_w1.shape[1] < target_hidden:
             raise ValueError(
@@ -96,6 +138,7 @@ def load_structured_moe_ffn_init(
         selected_neurons += indices.numel()
 
     return {
+        'source_type': '+'.join(sorted(source_types)),
         'layers': len(w1_keys),
         'tensors': loaded_tensors,
         'selected_neurons': selected_neurons,

@@ -25,17 +25,24 @@ DRY_RUN="${DRY_RUN:-0}"                  # 1 to generate synthetic benchmark dat
 ENABLE_MODEL_B="${ENABLE_MODEL_B:-0}"    # 0 => only model A (DAIR), 1 => include model B (UA)
 MAPS50="${MAPS50:-1}"                    # 1 => --maps50 small-area AP @ IoU 0.5, same as AP_small_50 in cas eval
 
-OUTPUT_JSON="${OUTPUT_JSON:-$SCRIPT_DIR/benchmark_pruning_curve_results.json}"
-OUTPUT_PLOT="${OUTPUT_PLOT:-$SCRIPT_DIR/pruning_tradeoff.pdf}"
+if [[ "$ENABLE_MODEL_B" == "1" && -z "${OUTPUT_NAMESPACE+x}" ]]; then
+  OUTPUT_NAMESPACE="dual_protocol"
+else
+  OUTPUT_NAMESPACE="${OUTPUT_NAMESPACE:-dairv2x_vehicle5}"
+fi
+OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/figures/$OUTPUT_NAMESPACE}"
+OUTPUT_JSON="${OUTPUT_JSON:-$OUTPUT_DIR/benchmark_pruning_curve_${OUTPUT_NAMESPACE}.json}"
+OUTPUT_PLOT="${OUTPUT_PLOT:-$OUTPUT_DIR/pruning_tradeoff_${OUTPUT_NAMESPACE}.pdf}"
+mkdir -p "$OUTPUT_DIR"
 INFERENCE_RATIOS="${INFERENCE_RATIOS:-0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0}"
 
 # Model A (DAIR)
 CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
-RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
+RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # Model B (UA)
 CONFIG_B="${CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml}"
-RESUME_B="${RESUME_B:-experiments/CaS-DETR/outputs/ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac/best_stg2.pth}"
+RESUME_B="${RESUME_B:-experiments/CaS-DETR/outputs/uadetrac_vehicle1/ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac/best_stg2.pth}"
 
 # Legend keys: order matches METRIC_INDICES default 0 1 3.
 if [[ "$ENABLE_MODEL_B" == "1" ]]; then
@@ -53,11 +60,11 @@ CURVE_B_3="${CURVE_B_3:-Small (AP_S) - UA}"
 
 # Test split overrides for val_dataloader (used when EVAL_SPLIT=test):
 # DAIR uses shared img root + instances_test.json
-TEST_IMG_A="${TEST_IMG_A:-/root/autodl-fs/datasets/DAIR-V2X}"
-TEST_ANN_A="${TEST_ANN_A:-/root/autodl-fs/datasets/DAIR-V2X/annotations/instances_test.json}"
+TEST_IMG_A="${TEST_IMG_A:-/root/autodl-fs/datasets/DAIR-V2X-Vehicle5}"
+TEST_ANN_A="${TEST_ANN_A:-/root/autodl-fs/datasets/DAIR-V2X-Vehicle5/annotations/instances_test.json}"
 # UA-DETRAC uses dedicated /test folder + instances_test.json
-TEST_IMG_B="${TEST_IMG_B:-/root/autodl-fs/datasets/UA-DETRAC_COCO/test}"
-TEST_ANN_B="${TEST_ANN_B:-/root/autodl-fs/datasets/UA-DETRAC_COCO/annotations/instances_test.json}"
+TEST_IMG_B="${TEST_IMG_B:-/root/autodl-fs/datasets/UA-DETRAC-Vehicle1/test}"
+TEST_ANN_B="${TEST_ANN_B:-/root/autodl-fs/datasets/UA-DETRAC-Vehicle1/annotations/instances_test.json}"
 
 CMD=(
   python3 experiments/analysis/benchmark_pruning_curve.py

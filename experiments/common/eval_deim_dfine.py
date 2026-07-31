@@ -42,6 +42,7 @@ from common.det_eval_metrics import (
 )
 from common.detr_eval_utils import log_detr_eval_summary, run_detr_benchmark
 from common.result_paths import result_csv, run_metadata
+from common.dataset_protocol import apply_detr_protocol_overrides
 
 logging.basicConfig(
     level=logging.INFO,
@@ -138,6 +139,18 @@ def _set_caip_static_keep_eval(model: Any, enabled: bool) -> Dict[str, Any]:
     return {"found": True, "prev": prev}
 
 
+def _set_caip_eval_keep_ratio(model: Any, keep_ratio: float) -> Dict[str, Any]:
+    """Override the pruner base ratio for a fixed-keep evaluation only."""
+    base = _unwrap_module(model)
+    enc = getattr(base, "encoder", None)
+    pruner = getattr(enc, "shared_token_pruner", None) if enc is not None else None
+    if pruner is None or not hasattr(pruner, "keep_ratio"):
+        return {"found": False}
+    prev = float(getattr(pruner, "keep_ratio"))
+    setattr(pruner, "keep_ratio", float(keep_ratio))
+    return {"found": True, "prev": prev}
+
+
 def _set_prune_in_eval(model: Any, enabled: bool) -> Dict[str, Any]:
     """Enable/disable token pruning during eval by toggling TokenLevelPruner.prune_in_eval.
 
@@ -189,7 +202,12 @@ def _resolve_resume_path(resume: Optional[str]) -> Optional[str]:
 # Framework helpers
 # ---------------------------------------------------------------------------
 
-def _setup_deim(config_path: str, resume: str, framework_dir: str = "DEIM"):
+def _setup_deim(
+    config_path: str,
+    resume: str,
+    framework_dir: str = "DEIM",
+    overrides: Optional[Dict[str, Any]] = None,
+):
     fw_dir = EXPERIMENTS_DIR / framework_dir
     sys.path.insert(0, str(fw_dir))
     saved_cwd = os.getcwd()
@@ -198,7 +216,7 @@ def _setup_deim(config_path: str, resume: str, framework_dir: str = "DEIM"):
     from engine.core import YAMLConfig
     from engine.solver import TASKS
 
-    cfg = YAMLConfig(config_path, resume=resume)
+    cfg = YAMLConfig(config_path, resume=resume, **(overrides or {}))
     if "HGNetv2" in cfg.yaml_cfg:
         cfg.yaml_cfg["HGNetv2"]["pretrained"] = False
 
@@ -206,7 +224,11 @@ def _setup_deim(config_path: str, resume: str, framework_dir: str = "DEIM"):
     return solver, cfg, saved_cwd
 
 
-def _setup_dfine(config_path: str, resume: str):
+def _setup_dfine(
+    config_path: str,
+    resume: str,
+    overrides: Optional[Dict[str, Any]] = None,
+):
     fw_dir = EXPERIMENTS_DIR / "D-FINE"
     sys.path.insert(0, str(fw_dir))
     saved_cwd = os.getcwd()
@@ -215,7 +237,7 @@ def _setup_dfine(config_path: str, resume: str):
     from src.core import YAMLConfig
     from src.solver import TASKS
 
-    cfg = YAMLConfig(config_path, resume=resume)
+    cfg = YAMLConfig(config_path, resume=resume, **(overrides or {}))
     if "HGNetv2" in cfg.yaml_cfg:
         cfg.yaml_cfg["HGNetv2"]["pretrained"] = False
 
@@ -623,10 +645,19 @@ def main():
                         help="Checkpoint path. If omitted, auto-detect from output_dir in config.")
     parser.add_argument("--model-name", default=None,
                         help="Model display name for CSV (default: config file stem)")
+    parser.add_argument("--run-id", default=None,
+                        help="Stable CSV run identifier (default: derived from output_dir)")
+    parser.add_argument("--seed", default=None,
+                        help="Seed recorded in the evaluation CSV metadata")
     parser.add_argument("--dataset-name", default=None,
                         help="Dataset display name for CSV (auto-detect from config paths)")
     parser.add_argument("--output-csv", default=None,
-                        help="CSV path (default: experiments/reports/eval_metrics.csv)")
+                        help="CSV path (default: experiments/reports/<protocol>/eval_metrics.csv)")
+    protocol = parser.add_mutually_exclusive_group()
+    protocol.add_argument("--dairv2x-vehicle5", dest="dataset_protocol", action="store_const", const="dairv2x_vehicle5")
+    protocol.add_argument("--dairv2x-vehicle8", dest="dataset_protocol", action="store_const", const="dairv2x_vehicle8")
+    protocol.add_argument("--uadetrac-vehicle1", dest="dataset_protocol", action="store_const", const="uadetrac_vehicle1")
+    protocol.add_argument("--uadetrac-vehicle4", dest="dataset_protocol", action="store_const", const="uadetrac_vehicle4")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--splits", default="val,test",
                         help="Comma-separated eval splits to run (default: val,test)")
@@ -639,6 +670,12 @@ def main():
         "--caip-static-keep-eval",
         action="store_true",
         help="When CAIP is on, use fixed keep ratio token_keep_ratio in eval mode; CAIP scores still rank tokens.",
+    )
+    parser.add_argument(
+        "--caip-eval-keep-ratio",
+        type=float,
+        default=None,
+        help="Fixed CAIP keep ratio for eval only; requires --caip-static-keep-eval.",
     )
     parser.add_argument(
         "--epoch",
@@ -657,15 +694,32 @@ def main():
         help="Optional JSON path for per-layer MoE router statistics.",
     )
     args = parser.parse_args()
+    if args.caip_eval_keep_ratio is not None:
+        if not args.caip_static_keep_eval:
+            parser.error("--caip-eval-keep-ratio requires --caip-static-keep-eval")
+        if not 0.0 < args.caip_eval_keep_ratio <= 1.0:
+            parser.error("--caip-eval-keep-ratio must be in (0, 1]")
 
     config_path = str(Path(args.config).resolve())
     model_name = args.model_name or Path(args.config).stem
+    protocol_overrides: Dict[str, Any] = {}
+    resolved_protocol = apply_detr_protocol_overrides(
+        protocol_overrides, config_path, args.dataset_protocol
+    )
 
     # Auto-detect dataset name from config path
     dataset_name = args.dataset_name
     if dataset_name is None:
         low = config_path.lower()
-        if "dairv2x" in low or "dair-v2x" in low or "dair_v2x" in low:
+        if resolved_protocol == "dairv2x_vehicle5":
+            dataset_name = "DAIR-V2X-Vehicle5"
+        elif resolved_protocol == "dairv2x_vehicle8":
+            dataset_name = "DAIR-V2X-Vehicle8"
+        elif resolved_protocol == "uadetrac_vehicle1":
+            dataset_name = "UA-DETRAC-Vehicle1"
+        elif resolved_protocol == "uadetrac_vehicle4":
+            dataset_name = "UA-DETRAC-Vehicle4"
+        elif "dairv2x" in low or "dair-v2x" in low or "dair_v2x" in low:
             dataset_name = "DAIR-V2X"
         elif "uadetrac" in low or "ua-detrac" in low or "ua_detrac" in low:
             dataset_name = "UA-DETRAC"
@@ -680,13 +734,24 @@ def main():
 
     # Setup framework
     if args.framework == "deim":
-        solver, cfg, saved_cwd = _setup_deim(config_path, args.resume or "", framework_dir="DEIM")
+        solver, cfg, saved_cwd = _setup_deim(
+            config_path, args.resume or "", framework_dir="DEIM",
+            overrides=protocol_overrides,
+        )
     elif args.framework == "casdeim":
-        solver, cfg, saved_cwd = _setup_deim(config_path, args.resume or "", framework_dir="CaS-DETR")
+        solver, cfg, saved_cwd = _setup_deim(
+            config_path, args.resume or "", framework_dir="CaS-DETR",
+            overrides=protocol_overrides,
+        )
     elif args.framework == "dqmdeim":
-        solver, cfg, saved_cwd = _setup_deim(config_path, args.resume or "", framework_dir="DQM-DETR")
+        solver, cfg, saved_cwd = _setup_deim(
+            config_path, args.resume or "", framework_dir="DQM-DETR",
+            overrides=protocol_overrides,
+        )
     else:
-        solver, cfg, saved_cwd = _setup_dfine(config_path, args.resume or "")
+        solver, cfg, saved_cwd = _setup_dfine(
+            config_path, args.resume or "", overrides=protocol_overrides
+        )
 
     # Resolve checkpoint, then solver.eval(): runs _setup() so solver has model/ema and loads weights.
     # Without eval(), DetSolver never runs BaseSolver._setup(), so attributes like solver.ema do not exist.
@@ -716,6 +781,18 @@ def main():
         LOG.info("Synced encoder epoch for eval: %s", enc_epoch)
     else:
         LOG.info("Encoder has no set_epoch(); skip epoch sync (requested=%s).", enc_epoch)
+
+    restore_keep_ratio: Dict[str, Any] = {"found": False}
+    if args.caip_eval_keep_ratio is not None:
+        restore_keep_ratio = _set_caip_eval_keep_ratio(model, args.caip_eval_keep_ratio)
+        if not restore_keep_ratio.get("found"):
+            LOG.error("Requested fixed CAIP keep ratio, but no TokenLevelPruner was found.")
+            sys.exit(2)
+        LOG.info(
+            "CAIP eval: keep ratio %.3f (previous %.3f)",
+            args.caip_eval_keep_ratio,
+            restore_keep_ratio.get("prev"),
+        )
 
     restore_static_keep: Dict[str, Any] = {"found": False}
     if args.caip_static_keep_eval:
@@ -808,11 +885,11 @@ def main():
             benchmark=bench_dict,
             weather_buckets=weather_buckets or None,
             metadata=run_metadata(
-                run_id=f"{output_dir.parent.name}/{output_dir.name}",
+                run_id=args.run_id or f"{output_dir.parent.name}/{output_dir.name}",
                 framework=args.framework,
                 model=model_name,
                 dataset=dataset_name,
-                seed=cfg.yaml_cfg.get("seed", ""),
+                seed=args.seed if args.seed is not None else cfg.yaml_cfg.get("seed", ""),
             ),
         )
         append_csv = True
@@ -845,6 +922,8 @@ def main():
         _set_prune_in_eval(model, enabled=bool(restore_pruning.get("prev")))
     if restore_static_keep.get("found"):
         _set_caip_static_keep_eval(model, enabled=bool(restore_static_keep.get("prev")))
+    if restore_keep_ratio.get("found"):
+        _set_caip_eval_keep_ratio(model, float(restore_keep_ratio.get("prev")))
 
     os.chdir(saved_cwd)
 

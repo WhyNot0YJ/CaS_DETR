@@ -34,6 +34,7 @@ for p in (_project_root, _cas_detr_root):
         sys.path.insert(0, str(p))
 
 from engine.core import YAMLConfig  # noqa: E402
+from common.dataset_protocol import apply_detr_protocol_overrides  # noqa: E402
 
 # Load train_end_inference_vis by file path so we do not import experiments.common
 # package, whose __init__ pulls in optional `common.*` modules.
@@ -402,7 +403,12 @@ def mask_hw_to_orig(mask_hw: np.ndarray, orig_w: int, orig_h: int) -> np.ndarray
 
 
 def load_model_and_post(cfg_path: str, resume: str, device: str):
-    cfg = YAMLConfig(cfg_path, resume=resume)
+    # Resolve the dataset taxonomy before constructing the model.  This keeps
+    # the standalone plotting entry point aligned with the training protocol
+    # registry (DAIR Vehicle5 / UA Vehicle1 by default).
+    protocol_updates: Dict[str, Any] = {}
+    apply_detr_protocol_overrides(protocol_updates, cfg_path, None)
+    cfg = YAMLConfig(cfg_path, resume=resume, **protocol_updates)
     if "HGNetv2" in cfg.yaml_cfg:
         cfg.yaml_cfg["HGNetv2"]["pretrained"] = False
 
@@ -842,7 +848,12 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="figure5_qualitative_cas_detr.pdf",
+        default=str(
+            _script_dir
+            / "figures"
+            / "dairv2x_vehicle5_uadetrac_vehicle1"
+            / "figure5_qualitative_cas_detr.pdf"
+        ),
         help="Path to save the figure. Default is PDF; use --compact for a smaller PDF.",
     )
     parser.add_argument("--images", type=str, nargs="+", default=None, help="Exactly 4 image paths in row order")

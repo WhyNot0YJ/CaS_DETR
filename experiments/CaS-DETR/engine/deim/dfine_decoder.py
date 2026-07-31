@@ -474,6 +474,9 @@ class DFINETransformer(nn.Module):
                  moe_top_k=2,
                  moe_noise_std=0.1,
                  router_init_std=0.02,
+                 moe_layer_indices=None,
+                 dense_dim_feedforward=None,
+                 moe_dim_feedforward=None,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -496,6 +499,21 @@ class DFINETransformer(nn.Module):
         self.reg_max = reg_max
         self.use_moe = use_moe
 
+        if moe_layer_indices is None:
+            self.moe_layer_indices = tuple(range(num_layers)) if use_moe else ()
+        else:
+            if not use_moe:
+                raise ValueError('moe_layer_indices requires use_moe=True')
+            self.moe_layer_indices = tuple(int(index) for index in moe_layer_indices)
+            if not self.moe_layer_indices:
+                raise ValueError('moe_layer_indices must not be empty')
+            if len(set(self.moe_layer_indices)) != len(self.moe_layer_indices):
+                raise ValueError('moe_layer_indices must be unique')
+            if any(index < 0 or index >= num_layers for index in self.moe_layer_indices):
+                raise ValueError(
+                    f'moe_layer_indices must be within [0, {num_layers - 1}]'
+                )
+
         assert query_select_method in ('default', 'one2many', 'agnostic'), ''
         assert cross_attn_method in ('default', 'discrete'), ''
         self.cross_attn_method = cross_attn_method
@@ -507,16 +525,32 @@ class DFINETransformer(nn.Module):
         # Transformer module
         self.up = nn.Parameter(torch.tensor([0.5]), requires_grad=False)
         self.reg_scale = nn.Parameter(torch.tensor([reg_scale]), requires_grad=False)
-        decoder_layer = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, \
+        layerwise_moe = moe_layer_indices is not None
+        dense_ffn_dim = dim_feedforward if dense_dim_feedforward is None else dense_dim_feedforward
+        moe_ffn_dim = dim_feedforward if moe_dim_feedforward is None else moe_dim_feedforward
+        base_ffn_dim = dense_ffn_dim if layerwise_moe else dim_feedforward
+        decoder_layer = TransformerDecoderLayer(hidden_dim, nhead, base_ffn_dim, dropout, \
             activation, num_levels, num_points, cross_attn_method=cross_attn_method,
-            use_moe=use_moe, num_experts=num_experts, moe_top_k=moe_top_k,
+            use_moe=use_moe and not layerwise_moe, num_experts=num_experts, moe_top_k=moe_top_k,
             moe_noise_std=moe_noise_std, router_init_std=router_init_std)
-        decoder_layer_wide = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, \
+        decoder_layer_wide = TransformerDecoderLayer(hidden_dim, nhead, base_ffn_dim, dropout, \
             activation, num_levels, num_points, cross_attn_method=cross_attn_method, layer_scale=layer_scale,
-            use_moe=use_moe, num_experts=num_experts, moe_top_k=moe_top_k,
+            use_moe=use_moe and not layerwise_moe, num_experts=num_experts, moe_top_k=moe_top_k,
             moe_noise_std=moe_noise_std, router_init_std=router_init_std)
         self.decoder = TransformerDecoder(hidden_dim, decoder_layer, decoder_layer_wide, num_layers, nhead,
                                           reg_max, self.reg_scale, self.up, eval_idx, layer_scale, act=activation)
+        if layerwise_moe:
+            moe_layer = TransformerDecoderLayer(hidden_dim, nhead, moe_ffn_dim, dropout, \
+                activation, num_levels, num_points, cross_attn_method=cross_attn_method,
+                use_moe=True, num_experts=num_experts, moe_top_k=moe_top_k,
+                moe_noise_std=moe_noise_std, router_init_std=router_init_std)
+            moe_layer_wide = TransformerDecoderLayer(hidden_dim, nhead, moe_ffn_dim, dropout, \
+                activation, num_levels, num_points, cross_attn_method=cross_attn_method, layer_scale=layer_scale,
+                use_moe=True, num_experts=num_experts, moe_top_k=moe_top_k,
+                moe_noise_std=moe_noise_std, router_init_std=router_init_std)
+            for index in self.moe_layer_indices:
+                template = moe_layer_wide if index > self.decoder.eval_idx else moe_layer
+                self.decoder.layers[index] = copy.deepcopy(template)
       # denoising
         self.num_denoising = num_denoising
         self.label_noise_ratio = label_noise_ratio

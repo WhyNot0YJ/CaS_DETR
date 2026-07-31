@@ -24,6 +24,7 @@ import yaml
 from engine.misc import dist_utils
 from engine.core import YAMLConfig, yaml_utils
 from engine.solver import TASKS
+from common.dataset_protocol import apply_detr_protocol_overrides
 
 debug=False
 
@@ -102,7 +103,10 @@ def main(args, ) -> None:
 
     update_dict = yaml_utils.parse_cli(args.update)
     update_dict.update({k: v for k, v in args.__dict__.items() \
-        if k not in ['update', ] and v is not None})
+        if k not in ['update', 'dataset_protocol'] and v is not None})
+    apply_detr_protocol_overrides(
+        update_dict, args.config, args.dataset_protocol
+    )
 
     cfg = YAMLConfig(args.config, **update_dict)
     _resolve_tuning_checkpoint(cfg)
@@ -143,6 +147,11 @@ if __name__ == '__main__':
     parser.add_argument('--output-dir', type=str, help='output directoy')
     parser.add_argument('--summary-dir', type=str, help='tensorboard summry')
     parser.add_argument('--test-only', action='store_true', default=False,)
+    protocol = parser.add_mutually_exclusive_group()
+    protocol.add_argument('--dairv2x-vehicle5', dest='dataset_protocol', action='store_const', const='dairv2x_vehicle5')
+    protocol.add_argument('--dairv2x-vehicle8', dest='dataset_protocol', action='store_const', const='dairv2x_vehicle8')
+    protocol.add_argument('--uadetrac-vehicle1', dest='dataset_protocol', action='store_const', const='uadetrac_vehicle1')
+    protocol.add_argument('--uadetrac-vehicle4', dest='dataset_protocol', action='store_const', const='uadetrac_vehicle4')
 
     # priority 1
     parser.add_argument('-u', '--update', nargs='+', help='update yaml config')

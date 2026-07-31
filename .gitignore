@@ -170,6 +170,9 @@ experiments/**/dataset/
 !experiments/*/configs/
 !experiments/*/configs/dataset/
 !experiments/*/configs/dataset/**
+!experiments/RT-DETR/rtdetrv2_pytorch/configs/
+!experiments/RT-DETR/rtdetrv2_pytorch/configs/dataset/
+!experiments/RT-DETR/rtdetrv2_pytorch/configs/dataset/**
 /experiments/deformable-detr/datasets/
 /experiments/yolo/external/YOLOX/datasets/
 /experiments/yolo/external/YOLOX/YOLOX_outputs/
@@ -183,5 +186,12 @@ experiments/**/dataset/
 # TensorRT / export sidecar outputs
 **/*.build.json
 **/*.onnx.data
+
+# Local failed/preflight experiment archives
+/artifacts/failed_training_preflight_*/
 /experiments/DQM-DETR/**/*.zip
 /experiments/DQM-DETR/**/*.html
+
+# Generated analysis figures and protocol-specific subset exports
+/experiments/analysis/figures/
+/experiments/reports/*/scene_complexity/

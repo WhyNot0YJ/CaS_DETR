@@ -143,10 +143,23 @@ class BaseYOLOTrainer(ABC):
             log_base = self.checkpoint_config.get('log_dir', 'logs')
             data_yaml = self.data_config.get('data_yaml', '')
             ds_stem = Path(data_yaml).stem if data_yaml else 'unknown'
-            if 'dairv2x' in ds_stem.lower() or 'dair' in ds_stem.lower():
-                ds_dir = 'dairv2x'
+            protocol = os.environ.get('EXPERIMENT_DATASET_PROTOCOL', '').lower()
+            protocol_dir = {
+                'dairv2x_vehicle5': 'dairv2x_vehicle5',
+                'dairv2x_vehicle8': 'dairv2x_vehicle8',
+                'uadetrac_vehicle1': 'uadetrac_vehicle1',
+                'uadetrac_vehicle4': 'uadetrac_vehicle4',
+            }.get(protocol)
+            if protocol_dir:
+                ds_dir = protocol_dir
+            elif 'vehicle5' in str(data_yaml).lower():
+                ds_dir = 'dairv2x_vehicle5'
+            elif 'dairv2x' in ds_stem.lower() or 'dair' in ds_stem.lower():
+                ds_dir = 'dairv2x_vehicle8'
+            elif 'vehicle1' in str(data_yaml).lower():
+                ds_dir = 'uadetrac_vehicle1'
             elif 'uadetrac' in ds_stem.lower() or 'ua' in ds_stem.lower() or ds_stem == 'data':
-                ds_dir = 'uadetrac'
+                ds_dir = 'uadetrac_vehicle4'
             else:
                 ds_dir = ds_stem
             # 锚定到本文件所在目录（experiments/yolo），避免 cwd 与 YOLOX/Ultralytics 不一致时路径错位
@@ -627,10 +640,15 @@ class BaseYOLOTrainer(ABC):
         """
         data_yaml = str(self.data_config.get('data_yaml', '') or '')
         data_lower = data_yaml.lower()
-        if 'dairv2x' in data_lower or 'dair-v2x' in data_lower or 'dair' in data_lower:
-            return 'DAIR-V2X'
-        if 'uadetrac' in data_lower or 'ua-detrac' in data_lower:
-            return 'UA-DETRAC'
+        protocol = os.environ.get('EXPERIMENT_DATASET_PROTOCOL', '').lower()
+        if protocol == 'dairv2x_vehicle5' or 'vehicle5' in data_lower:
+            return 'DAIR-V2X-Vehicle5'
+        if protocol == 'dairv2x_vehicle8' or 'dairv2x' in data_lower or 'dair-v2x' in data_lower or 'dair' in data_lower:
+            return 'DAIR-V2X-Vehicle8'
+        if protocol == 'uadetrac_vehicle1' or 'vehicle1' in data_lower:
+            return 'UA-DETRAC-Vehicle1'
+        if protocol == 'uadetrac_vehicle4' or 'uadetrac' in data_lower or 'ua-detrac' in data_lower:
+            return 'UA-DETRAC-Vehicle4'
 
         stem = Path(data_yaml).stem or 'unknown'
         stem_lower = stem.lower()
@@ -1195,10 +1213,15 @@ class BaseYOLOTrainer(ABC):
             model_name = model_name.rsplit(".", 1)[0]
         data_yaml = str(self.data_config.get("data_yaml", ""))
         data_lower = data_yaml.lower()
-        if "dair" in data_lower:
-            dataset = "DAIR-V2X"
-        elif "uadetrac" in data_lower or "ua-detrac" in data_lower:
-            dataset = "UA-DETRAC"
+        protocol = os.environ.get("EXPERIMENT_DATASET_PROTOCOL", "").lower()
+        if protocol == "dairv2x_vehicle5" or "vehicle5" in data_lower:
+            dataset = "DAIR-V2X-Vehicle5"
+        elif protocol == "dairv2x_vehicle8" or "dair" in data_lower:
+            dataset = "DAIR-V2X-Vehicle8"
+        elif protocol == "uadetrac_vehicle1" or "vehicle1" in data_lower:
+            dataset = "UA-DETRAC-Vehicle1"
+        elif protocol == "uadetrac_vehicle4" or "uadetrac" in data_lower or "ua-detrac" in data_lower:
+            dataset = "UA-DETRAC-Vehicle4"
         else:
             dataset = Path(data_yaml).stem or "unknown"
 

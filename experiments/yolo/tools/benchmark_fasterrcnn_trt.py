@@ -141,6 +141,7 @@ def main():
             "--engine", str(engine),
             "--model", args.model,
             "--output-csv", str(result_csv("benchmark")),
+            "--eval-csv", str(result_csv("eval_metrics")),
             "--run-id", args.run_id or args.output_dir.resolve().name,
             "--framework", "fasterrcnn",
             "--dataset", args.dataset,

@@ -26,6 +26,7 @@ from common.dataset_registry import (
     find_dataset_profile_by_data_yaml,
     apply_yolo_dataset_profile as apply_dataset_profile,
 )
+from common.dataset_protocol import set_report_protocol
 
 DEFAULT_CLASS_NAMES: List[str] = []
 
@@ -68,8 +69,19 @@ def build_trainer(version: str, config: dict, config_path: Optional[str] = None,
     return UnifiedYOLOTrainer(version, config, config_path)
 
 
-def find_latest_checkpoint(log_base: str) -> Optional[str]:
-    log_dir = Path(log_base)
+def find_latest_checkpoint(log_base: str, config: dict) -> Optional[str]:
+    data_yaml = str(config.get("data", {}).get("data_yaml", "")).lower()
+    if "vehicle5" in data_yaml:
+        dataset_dir = "dairv2x_vehicle5"
+    elif "dair" in data_yaml:
+        dataset_dir = "dairv2x_vehicle8"
+    elif "vehicle1" in data_yaml:
+        dataset_dir = "uadetrac_vehicle1"
+    elif "uadetrac" in data_yaml or "ua-detrac" in data_yaml:
+        dataset_dir = "uadetrac_vehicle4"
+    else:
+        dataset_dir = Path(data_yaml).stem
+    log_dir = _yolo_dir / log_base / dataset_dir
     if not log_dir.exists():
         return None
     checkpoints = list(log_dir.glob("**/weights/best.pt"))
@@ -83,6 +95,11 @@ def main():
     parser.add_argument("--version", type=str, required=True, help="YOLO版本: v5/v8/v12")
     parser.add_argument("--config", type=str, default=None, help="YAML配置文件路径")
     parser.add_argument("--dataset", type=str, default=None, help="数据集键名或别名（在 configs/datasets.yaml 中定义）")
+    protocol = parser.add_mutually_exclusive_group()
+    protocol.add_argument("--dairv2x-vehicle5", action="store_true")
+    protocol.add_argument("--dairv2x-vehicle8", action="store_true")
+    protocol.add_argument("--uadetrac-vehicle1", action="store_true")
+    protocol.add_argument("--uadetrac-vehicle4", action="store_true")
     parser.add_argument("--dataset_registry", type=str, default="configs/datasets.yaml", help="数据集注册表路径")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None, help="从指定检查点恢复")
     parser.add_argument("--resume", action="store_true", help="自动从最新检查点恢复")
@@ -100,6 +117,14 @@ def main():
 
     selected_class_names = DEFAULT_CLASS_NAMES
     datasets = load_dataset_registry(Path(args.dataset_registry))
+    if args.dairv2x_vehicle5:
+        args.dataset = "dairv2x_vehicle5"
+    elif args.dairv2x_vehicle8:
+        args.dataset = "dairv2x_vehicle8"
+    elif args.uadetrac_vehicle1:
+        args.dataset = "uadetrac_vehicle1"
+    elif args.uadetrac_vehicle4:
+        args.dataset = "uadetrac_vehicle4"
 
     if args.dataset:
         profile = resolve_dataset_profile(datasets, args.dataset)
@@ -116,10 +141,12 @@ def main():
             profile_classes = profile.get("class_names", [])
             if isinstance(profile_classes, list) and profile_classes:
                 selected_class_names = [str(name) for name in profile_classes]
+    if profile:
+        set_report_protocol(str(profile.get("report_protocol", "dairv2x_vehicle5")))
 
     if args.resume and not args.resume_from_checkpoint:
         log_base = config.get("checkpoint", {}).get("log_dir", "logs")
-        latest_checkpoint = find_latest_checkpoint(log_base)
+        latest_checkpoint = find_latest_checkpoint(log_base, config)
         if latest_checkpoint:
             args.resume_from_checkpoint = latest_checkpoint
             print(f"📦 找到最新检查点: {latest_checkpoint}")
@@ -136,6 +163,7 @@ def main():
         config=config,
         config_path=str(config_path),
         class_names=selected_class_names,
+        resume_checkpoint=args.resume_from_checkpoint,
     )
     trainer.start_training(
         resume_checkpoint=args.resume_from_checkpoint,

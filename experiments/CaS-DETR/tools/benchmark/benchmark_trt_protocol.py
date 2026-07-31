@@ -13,7 +13,7 @@ import sys
 EXPERIMENTS_DIR = Path(__file__).resolve().parents[3]
 if str(EXPERIMENTS_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENTS_DIR))
-from common.result_paths import upsert_csv_rows
+from common.result_paths import update_csv_rows, upsert_csv_rows
 from benchmark_runtime import command_output, ensure_gpu_idle, summarize
 
 
@@ -22,6 +22,11 @@ def parse_args():
     parser.add_argument("--engine", type=Path, required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output-csv", type=Path, required=True)
+    parser.add_argument(
+        "--eval-csv",
+        type=Path,
+        help="Optional eval_metrics.csv whose matching run_id receives TensorRT speed columns.",
+    )
     parser.add_argument("--run-id", default="")
     parser.add_argument("--framework", default="")
     parser.add_argument("--dataset", default="")
@@ -225,6 +230,22 @@ def main():
         rows,
         key_fields=("run_id", "mode"),
     )
+    if args.eval_csv:
+        model_row, end_to_end_row = rows
+        updated = update_csv_rows(
+            args.eval_csv,
+            match={"run_id": args.run_id},
+            updates={
+                "Inference_FPS": f"{float(model_row['fps']):.2f}",
+                "Inference_Latency_ms": f"{float(model_row['mean_latency_ms']):.2f}",
+                "EndToEnd_FPS": f"{float(end_to_end_row['fps']):.2f}",
+                "EndToEnd_Latency_ms": f"{float(end_to_end_row['mean_latency_ms']):.2f}",
+            },
+        )
+        if not updated:
+            raise RuntimeError(
+                f"TensorRT rows were written but no eval_metrics rows matched run_id={args.run_id}"
+            )
 
 
 if __name__ == "__main__":

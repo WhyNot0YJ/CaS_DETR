@@ -165,6 +165,7 @@ def main():
     from common.result_paths import result_csv
 
     benchmark_csv = result_csv("benchmark")
+    eval_csv = result_csv("eval_metrics")
 
     export_onnx(args.weights, onnx, args)
     # ONNX export may leave the PyTorch model/context cached on CUDA. Release
@@ -189,6 +190,7 @@ def main():
         [
             sys.executable, str(shared_dir / "benchmark" / "benchmark_trt_protocol.py"),
             "--engine", str(engine), "--model", model_name, "--output-csv", str(benchmark_csv),
+            "--eval-csv", str(eval_csv),
             "--run-id", run_id, "--framework", "yolox" if args.yolox_exp else "yolo",
             "--dataset", args.dataset, "--seed", args.seed,
             "--images", str(args.images.resolve()), "--imgsz", str(args.imgsz),

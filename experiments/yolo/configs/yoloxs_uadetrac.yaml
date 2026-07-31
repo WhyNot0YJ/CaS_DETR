@@ -8,8 +8,8 @@ training:
   batch_size: 16
 
 data:
-  data_yaml: "/root/autodl-fs/datasets/UA-DETRAC_YOLO/data.yaml"
-  coco_data_root: "/root/autodl-fs/datasets/UA-DETRAC_COCO"
+  data_yaml: "/root/autodl-fs/datasets/UA-DETRAC_YOLO_Vehicle1/uadetrac_vehicle1.yaml"
+  coco_data_root: "/root/autodl-fs/datasets/UA-DETRAC-Vehicle1"
 
 checkpoint:
   log_dir: "logs"

@@ -20,6 +20,7 @@ from common.dataset_registry import (
     load_dataset_registry,
     resolve_dataset_profile,
 )
+from common.dataset_protocol import set_report_protocol
 
 DEFAULT_CLASS_NAMES: List[str] = []
 
@@ -36,8 +37,7 @@ def merge_coco_root_from_profile(config: dict, profile: Optional[dict]) -> dict:
         return config
     merged = dict(config)
     data = dict(merged.get("data", {}))
-    if not data.get("coco_data_root"):
-        data["coco_data_root"] = str(root)
+    data["coco_data_root"] = str(root)
     merged["data"] = data
     return merged
 
@@ -46,6 +46,11 @@ def main():
     parser = argparse.ArgumentParser(description="YOLOX 训练（CaS_DETR）")
     parser.add_argument("--config", type=str, default=None, help="YAML 配置文件路径")
     parser.add_argument("--dataset", type=str, default=None, help="数据集键名（configs/datasets.yaml）")
+    protocol = parser.add_mutually_exclusive_group()
+    protocol.add_argument("--dairv2x-vehicle5", action="store_true")
+    protocol.add_argument("--dairv2x-vehicle8", action="store_true")
+    protocol.add_argument("--uadetrac-vehicle1", action="store_true")
+    protocol.add_argument("--uadetrac-vehicle4", action="store_true")
     parser.add_argument(
         "--dataset_registry",
         type=str,
@@ -69,6 +74,14 @@ def main():
     if not registry_path.is_absolute():
         registry_path = _yolo_dir / registry_path
     datasets = load_dataset_registry(registry_path)
+    if args.dairv2x_vehicle5:
+        args.dataset = "dairv2x_vehicle5"
+    elif args.dairv2x_vehicle8:
+        args.dataset = "dairv2x_vehicle8"
+    elif args.uadetrac_vehicle1:
+        args.dataset = "uadetrac_vehicle1"
+    elif args.uadetrac_vehicle4:
+        args.dataset = "uadetrac_vehicle4"
 
     profile = None
     if args.dataset:
@@ -88,6 +101,8 @@ def main():
             pc = profile.get("class_names", [])
             if isinstance(pc, list) and pc:
                 selected_class_names = [str(x) for x in pc]
+    if profile:
+        set_report_protocol(str(profile.get("report_protocol", "dairv2x_vehicle5")))
 
     if args.resume and not args.resume_from_checkpoint:
         log_base = config.get("checkpoint", {}).get("log_dir", "logs")
@@ -129,10 +144,14 @@ def _infer_dataset_log_subdir(config: dict) -> Optional[str]:
     data_yaml = config.get("data", {}).get("data_yaml", "") or ""
     path_s = str(data_yaml).lower()
     stem = Path(data_yaml).stem.lower() if data_yaml else ""
+    if "vehicle5" in path_s:
+        return "dairv2x_vehicle5"
     if "dair" in path_s or "dairv2x" in stem:
-        return "dairv2x"
+        return "dairv2x_vehicle8"
+    if "vehicle1" in path_s:
+        return "uadetrac_vehicle1"
     if "uadetrac" in path_s or "ua-detrac" in path_s or stem == "data":
-        return "uadetrac"
+        return "uadetrac_vehicle4"
     return None
 
 

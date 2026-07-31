@@ -53,7 +53,7 @@ class BaseSolver(object):
             self.load_tuning_state(self.cfg.tuning)
 
         moe_ffn_init = self.cfg.yaml_cfg.get('moe_ffn_init')
-        if moe_ffn_init:
+        if moe_ffn_init and not self.cfg.resume:
             report = load_structured_moe_ffn_init(
                 self.model,
                 source=moe_ffn_init['source'],

@@ -9,6 +9,8 @@ TRT_BENCHMARK="${TRT_BENCHMARK:-1}"
 TRT_WARMUP="${TRT_WARMUP:-100}"
 TRT_ITERATIONS="${TRT_ITERATIONS:-1000}"
 TRTEXEC="${TRTEXEC:-trtexec}"
+TRT_BUILDER="${TRT_BUILDER:-auto}"
+EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 
 ################################################################################
 # 批量实验运行脚本 - 方案2：鲁棒批量运行
@@ -21,26 +23,25 @@ TRTEXEC="${TRTEXEC:-trtexec}"
 #   - 完成后生成汇总报告
 #
 # 使用方法：
-#   ./run_batch_experiments.sh                                 # 运行所有实验（完整epochs）
+#   ./run_batch_experiments.sh                                 # 默认 Vehicle5，运行完整实验矩阵
 #   ./run_batch_experiments.sh --test                          # 测试模式：运行所有配置，每个只跑2个epoch
 #   ./run_batch_experiments.sh --rtdetrv2                      # 官方 RT-DETR v2（rtdetrv2_pytorch + train_adapter.py，默认 --cas-eval）
 #   ./run_batch_experiments.sh --rt-detr                       # 与 --rtdetrv2 相同（v1 已移除，仅保留 v2）
 #   DAIRV2X_DATA_ROOT=/path UADETRAC_DATA_ROOT=/path ./run_batch_experiments.sh --yes --rtdetrv2
 #   RTDETR_TUNING_CKPT=/path/to.pth ./run_batch_experiments.sh --yes --rtdetrv2
 #   ./run_batch_experiments.sh --dairv2x --rtdetrv2          # 仅 DAIR-V2X 的 RT-DETR v2
-#   ./run_batch_experiments.sh --cas_detr                      # 只运行新的 CaS-DETR 第一阶段消融实验（仅 DAIR-V2X）
+#   ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac
+#                                                               # DEIM baseline vs. CaS 主实验：Dense 首层 + 后两层 MoE
+#   ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only
+#   ./run_batch_experiments.sh --cas-dynamic-base --dairv2x    # DAIR dynamic base .5/.7（.3 复用主实验）
+#   ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x
+#   CAS_TOKEN_POLICY_CONFIG=<full.yml> CAS_TOKEN_POLICY_CHECKPOINT=<best.pth> ./run_batch_experiments.sh --cas-token-policy-test
+#                                                               # 同一 D5 checkpoint 的 dynamic/fixed .3/.7/1.0 test-only 对照
+#   ./run_batch_experiments.sh --cas-all-train --dairv2x       # 所有 DAIR CaS 训练组（不含 native DEIM 与 token policy test）
 #   ./run_batch_experiments.sh --dqm_detr                      # 只运行 DQM-DETR 全部消融+主实验（消融子组 + 主实验 × 3 数据集）
 #   ./run_batch_experiments.sh --dqm_module_ablation           # 只运行 DQM 模块消融（all_off / wo_dqm / wo_qmqc / degradation_only）
 #   ./run_batch_experiments.sh --dqm_degradation               # 只运行 DQM 退化消融（full_default / mild / strong / no_fog / no_noise_blur）
 #   ./run_batch_experiments.sh --dqm_main                      # 只运行 DQM 主实验（dqm05 / dqm15 / qmqc025 / qmqc100）
-#   ./run_batch_experiments.sh --cas_caip                      # 只运行 CAIP 消融（4 个配置）
-#   ./run_batch_experiments.sh --cas_caip_base05               # 只运行 CAIP 消融：r_base=0.5, alpha=1.0（4 个配置，DAIR+UA）
-#   ./run_batch_experiments.sh --cas_pack_moe4_base03_a10      # 打包：moe4 base03_a10 双数据集 + moe4_only + cass_only_caip base03_a10（不含 keep*_fixed）
-#   ./run_batch_experiments.sh --cas_fixed_keep_ratio          # 仅 DAIR：moe4 base03_a10 + keep0.3/0.7 固定（与 pack 分开跑）
-#   ./run_batch_experiments.sh --cas_moe4_base03_a10_fixed_keep  # 同上别名
-#   ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 总参数量扫描：固定 experts=4/top_k=2，扫 0.5x/1x/2x/4x（DAIR-V2X）
-#   ./run_batch_experiments.sh --cas_moe_expert_scan           # MoE 专家数扫描：固定 top_k=2/dim_ff=128，扫 experts=3/4/6（DAIR-V2X）
-#   ./run_batch_experiments.sh --cas_moe_ffn_init              # 0.5x/1x/2x/4x MoE 使用训练后 4x FFN 初始化
 #   ./run_batch_experiments.sh --yolov5                        # 只运行YOLOv5实验
 #   ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8实验
 #   ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12实验
@@ -51,10 +52,9 @@ TRTEXEC="${TRTEXEC:-trtexec}"
 #   ./run_batch_experiments.sh --fasterrcnn                    # 只运行 torchvision Faster R-CNN（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）
-#   ./run_batch_experiments.sh --deformable-detr               # 只运行Deformable-DETR实验
 #   ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2，等价 --rtdetrv2
 #   ./run_batch_experiments.sh --test --rtdetrv2               # 测试模式只跑官方 RT-DETRv2（2 epoch + cas-eval）
-#   ./run_batch_experiments.sh --test --cas_detr               # 测试模式只运行 CaS-DETR（DAIR-V2X 消融）
+#   ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验（2 epoch smoke test）
 #   ./run_batch_experiments.sh --test --dqm_detr               # 测试模式只运行 DQM-DETR 全部消融+主实验（2 epoch）
 #   ./run_batch_experiments.sh --test --dqm_module_ablation    # 测试模式只运行 DQM 模块消融
 #   ./run_batch_experiments.sh --test --dqm_degradation        # 测试模式只运行 DQM 退化消融
@@ -64,26 +64,28 @@ TRTEXEC="${TRTEXEC:-trtexec}"
 #   ./run_batch_experiments.sh --test --yolov12                # 测试模式只运行YOLOv12
 #   ./run_batch_experiments.sh --test --yolox                  # 测试模式只运行 YOLOX
 #   ./run_batch_experiments.sh --test --fasterrcnn             # 测试模式只运行 Faster R-CNN
-#   ./run_batch_experiments.sh --test --deformable-detr        # 测试模式只运行Deformable-DETR
 #   ./run_batch_experiments.sh --r18                           # 只运行ResNet-18实验
 #   ./run_batch_experiments.sh --n                             # 只运行所有 n 规模 YOLO（v5/v8/v12）
 #   ./run_batch_experiments.sh --s                             # 只运行所有 s 规模 YOLO / YOLOX
 #   ./run_batch_experiments.sh --m                             # 只运行所有 m 规模 YOLO / YOLOX
 #   ./run_batch_experiments.sh --custom cfg1.yaml cfg2.yaml    # 自定义配置列表
-#   ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x casdeim-moe-only-dairv2x   # 使用内置键名选择
-#   ./run_batch_experiments.sh --dairv2x                       # 只保留 DAIR-V2X 维度（可叠 --rtdetrv2 / --cas_detr 等）
+#   ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x cas-component-decoder-only-dairv2x-vehicle5  # 使用内置键名选择
+#   ./run_batch_experiments.sh --dairv2x                       # 只保留 DAIR-V2X 维度（可叠 --rtdetrv2 / --cas-main 等）
 #   ./run_batch_experiments.sh --uadetrac                     # 只保留 UA-DETRAC 维度
 #   ./run_batch_experiments.sh --dataset dairv2x --rtdetrv2    # 同上：--dataset 与 --dairv2x 等价；可与 --rtdetrv2 任意顺序组合
 #   ./run_batch_experiments.sh --rtdetrv2 --dataset dairv2x     # 同上
 #   ./run_batch_experiments.sh --dataset dairv2x --rt-detr      # --rt-detr 与 --rtdetrv2 相同
 #   ./run_batch_experiments.sh --dataset dairv2x,uadetrac     # 同传 --dairv2x --uadetrac（两者都选则不按数据集筛）
+#   ./run_batch_experiments.sh --dairv2x-vehicle8              # DAIR-V2X 旧 8 类协议
+#   ./run_batch_experiments.sh --uadetrac-vehicle4             # UA-DETRAC 旧 4 类协议
+#   ./run_batch_experiments.sh --uadetrac --yolo --s           # UA-DETRAC 默认 Vehicle1
 #   ./run_batch_experiments.sh --select                        # 交互式选择待运行配置
 #   ./run_batch_experiments.sh --rerun-failed [LOG_DIR]        # 自动选择上次失败的实验
 #
 # CaS_DETR / RT-DETR / MOE：输入为 letterbox 到 target_size（见各 YAML 中 augmentation.resize.letterbox_fill，一般 114）。
 # 一键非交互（跳过确认）示例：
-#   ./run_batch_experiments.sh --yes --cas_detr
-#   ./run_batch_experiments.sh --yes --test --rtdetrv2 --cas_detr --dqm_detr --dqm_module_ablation
+#   ./run_batch_experiments.sh --yes --cas-main --dairv2x
+#   ./run_batch_experiments.sh --yes --test --rtdetrv2 --cas-main --dqm_detr --dqm_module_ablation
 ################################################################################
 
 set -e  # 遇到错误时不退出（我们会手动处理）
@@ -109,6 +111,10 @@ FAILED_EXPERIMENTS=0
 SKIPPED_EXPERIMENTS=0
 TEST_MODE=false  # 测试模式标志
 SKIP_CONFIRM=false  # --yes：跳过「是否开始」确认，便于一键 / CI
+DRY_RUN=false
+DAIRV2X_VEHICLE5_MODE=true
+UADETRAC_VEHICLE1_MODE=true
+DEFAULT_ALL_PROTOCOLS=false
 # --dairv2x / --uadetrac（或 --dataset）解析后写入；二者同时为 true 时不筛选
 SCOPE_DAIRV2X=false
 SCOPE_UADETRAC=false
@@ -116,6 +122,7 @@ SCOPE_SIZE_N=false
 SCOPE_SIZE_S=false
 SCOPE_SIZE_M=false
 TOTAL_PLANNED_RUNS=0
+CAS_TOKEN_POLICY_TEST=false
 
 # 选择可用的 Python 解释器
 PYTHON_BIN=""
@@ -148,27 +155,52 @@ log_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+prepare_vehicle5_dataset() {
+    log_info "准备 DAIR-V2X Vehicle5 派生标注（原 8 类数据不会被修改）"
+    "$PYTHON_BIN" "$SCRIPT_DIR/common/prepare_dairv2x_vehicle5.py"
+}
+
+prepare_uadetrac_vehicle1_dataset() {
+    log_info "准备 UA-DETRAC Vehicle1 派生标注（原 4 类数据不会被修改）"
+    "$PYTHON_BIN" "$SCRIPT_DIR/common/prepare_uadetrac_vehicle1.py"
+}
+
 run_trt_benchmark_for_eval() {
-    local framework="$1" config="$2" output_dir="$3" model="$4"
+    local framework="$1" config="$2" output_dir="$3" model="$4" requested_run_id="${5:-}"
     local images="/root/autodl-fs/datasets/DAIR-V2X/image"
-    [[ "$config" == *uadetrac* ]] && images="/root/autodl-fs/datasets/UA-DETRAC_COCO/val"
+    [ "${EXPERIMENT_DATASET_PROTOCOL:-}" = "dairv2x_vehicle5" ] \
+        && images="/root/autodl-fs/datasets/DAIR-V2X-Vehicle5/image"
+    if [[ "$config" == *uadetrac* ]]; then
+        images="/root/autodl-fs/datasets/UA-DETRAC_COCO/val"
+        [ "${EXPERIMENT_DATASET_PROTOCOL:-}" = "uadetrac_vehicle1" ] \
+            && images="/root/autodl-fs/datasets/UA-DETRAC-Vehicle1/val"
+    fi
     [ "$TRT_BENCHMARK" = "0" ] && return 0
-    local checkpoint="$output_dir/best.pth"
-    [ -f "$checkpoint" ] || checkpoint="$output_dir/last.pth"
+    local checkpoint=""
+    local candidate
+    for candidate in best_stg2.pth best.pth best_stg1.pth last.pth; do
+        if [ -f "$output_dir/$candidate" ]; then
+            checkpoint="$output_dir/$candidate"
+            break
+        fi
+    done
     if [ ! -f "$checkpoint" ]; then
-        log_warning "TensorRT benchmark 跳过（缺少 checkpoint）: $output_dir"
-        return 0
+        log_error "TensorRT benchmark 失败（缺少 checkpoint）: $output_dir"
+        return 1
     fi
     local run_id
-    run_id="$(basename "$(dirname "$output_dir")")/$(basename "$output_dir")"
-    log_info "运行 TensorRT benchmark（FPS 将写入主表最后一列）: $model"
-    "$PYTHON_BIN" "$SCRIPT_DIR/CaS-DETR/tools/benchmark/benchmark_experiment_trt.py" \
+    run_id="${requested_run_id:-$(basename "$(dirname "$output_dir")")/$(basename "$output_dir")}"
+    log_info "运行 TensorRT FP16 benchmark 并同步 reports: $model"
+    if ! "$PYTHON_BIN" "$SCRIPT_DIR/CaS-DETR/tools/benchmark/benchmark_experiment_trt.py" \
         --framework "$framework" --config "$SCRIPT_DIR/$config" \
         --checkpoint "$SCRIPT_DIR/$checkpoint" --output-dir "$SCRIPT_DIR/$output_dir" \
         --model "$model" --images "$images" \
-        --run-id "$run_id" \
-        --trtexec "$TRTEXEC" --warmup "$TRT_WARMUP" --iterations "$TRT_ITERATIONS" \
-        || log_warning "TensorRT benchmark 失败（不影响训练结果）: $model"
+        --run-id "$run_id" --dataset-protocol "$EXPERIMENT_DATASET_PROTOCOL" \
+        --seed "$EXPERIMENT_SEED" --builder "$TRT_BUILDER" --trtexec "$TRTEXEC" \
+        --warmup "$TRT_WARMUP" --iterations "$TRT_ITERATIONS"; then
+        log_error "TensorRT benchmark 或 reports 同步失败: $model"
+        return 1
+    fi
 }
 
 # 根据路径与 NAME_TO_PATH 键判断是否属于 dairv2x / uadetrac；want_* 为 true 时表示当前筛选需要该侧
@@ -284,6 +316,59 @@ apply_model_size_filter_to_configs() {
     fi
 }
 
+apply_default_protocols_to_configs() {
+    [ "$DAIRV2X_VEHICLE5_MODE" = true ] || return 0
+
+    local converted=()
+    local p target
+    local -A seen=()
+    for p in "${CONFIGS_TO_RUN[@]}"; do
+        target=""
+        case "$p" in
+            *uadetrac*)
+                if [ "$SCOPE_UADETRAC" = true ]; then
+                    target="$p"
+                else
+                    continue
+                fi
+                ;;
+            RT-DETR/rtdetrv2_pytorch/*)
+                target="RT-DETR/rtdetrv2_pytorch/configs/rtdetrv2/rtdetrv2_r18vd_100e_dairv2x.yml@dairv2x_vehicle5"
+                ;;
+            CaS-DETR/*|DQM-DETR/*|DEIM/*|D-FINE/*)
+                target="$p"
+                ;;
+            yolo/configs/*dairv2x.yaml)
+                target="$p"
+                ;;
+            *)
+                log_warning "Vehicle5 模式跳过不支持的入口: $p"
+                continue
+                ;;
+        esac
+        if [ -z "${seen[$target]+x}" ]; then
+            converted+=("$target")
+            seen["$target"]=1
+        fi
+    done
+
+    if [ "$DEFAULT_ALL_PROTOCOLS" = true ]; then
+        for target in \
+            "DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x.yml" \
+            "D-FINE/configs/dfine/dfine_hgnetv2_s_dairv2x.yml"; do
+            if [ -z "${seen[$target]+x}" ]; then
+                converted+=("$target")
+                seen["$target"]=1
+            fi
+        done
+    fi
+
+    CONFIGS_TO_RUN=("${converted[@]}")
+    if [ "$SCOPE_DAIRV2X" = true ] || [ "$DEFAULT_ALL_PROTOCOLS" = true ]; then
+        log_info "Vehicle5 模式：Car/Truck/Van/Bus 合并为 vehicle"
+    fi
+}
+
 # 官方 RT-DETR v2（RT-DETR/rtdetrv2_pytorch/tools/train_adapter.py），训练后 CaS 风格评估见 --cas-eval。
 # 路径格式：<yml 相对 experiments 的路径>@<dairv2x|uadetrac>；数据根可通过环境变量覆盖：
 #   DAIRV2X_DATA_ROOT / UADETRAC_DATA_ROOT
@@ -294,80 +379,55 @@ declare -A RTDETRV2_ADAPTER_CONFIGS=(
     ["rtdetrv2-r18-uadetrac"]="RT-DETR/rtdetrv2_pytorch/configs/rtdetrv2/rtdetrv2_r18vd_100e_uadetrac.yml@uadetrac"
 )
 
-declare -a CORE_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_keep07_hgnetv2_s_dairv2x.yml"
+# CaS-DETR paper-aligned experiment plan.  Native DEIM is intentionally not
+# mirrored as an all-off CaS config; run it with --deim under the same protocol.
+declare -a CAS_MAIN_EXPERIMENTS=(
+    "CaS-DETR/configs/dataset/main/cas_detr_dense1_moe2_e4d128_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/main/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_uadetrac_vehicle1.yml"
 )
 
-declare -a CAS_CAIP_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe3_cass_caip_hgnetv2_s_uadetrac.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_hgnetv2_s_uadetrac.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_uadetrac.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_hgnetv2_s_dairv2x.yml"
+declare -a CAS_COMPONENT_ABLATION_EXPERIMENTS=(
+    "CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x_vehicle5.yml"
 )
 
-declare -a CAS_CAIP_BASE05_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe3_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_base05_a10_hgnetv2_s_uadetrac.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_base05_a10_hgnetv2_s_dairv2x.yml"
+# DAIR dynamic .3 is the main anchor.  This group adds only .5 and .7.
+declare -a CAS_DYNAMIC_BASE_ABLATION_EXPERIMENTS=(
+    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic07_hgnetv2_s_dairv2x_vehicle5.yml"
 )
 
-# 固定 keep_ratio（仍用 CAIP 打分，但 ratio 不随图变化）
-declare -a CAS_FIXED_KEEP_RATIO_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x.yml"
+# E=4 and top-k=2 stay fixed.  Capacity scans remain separate from the hybrid
+# main decoder and therefore include their own .5x/1x/2x/4x anchors.
+declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=(
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap4x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
 )
 
-# MoE 总参数量扫描：仅扫 dim_feedforward（每个专家 FFN 中间层维度）
-# 倍数定义：MoE 层总参数 / 普通单 FFN 参数 = num_experts * dim_feedforward / 1024
-# 单一变量对照：num_experts=4, moe_top_k=2 不变；其余 CAS/CAIP/CASS 与 base03_a10 基线一致
-# 按统一训练协议重新运行 cap05x/cap1x/cap2x/cap4x，避免混用历史 checkpoint
-# 用于回答：精度是否与 MoE 总专家容量相关？降到与稠密 FFN 同参、甚至 1/2 同参时是否仍有增益？
-declare -a CAS_MOE_CAPACITY_SCAN_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
+declare -A CAS_EXPERIMENT_CONFIGS=(
+    ["cas-main-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/main/cas_detr_dense1_moe2_e4d128_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-main-uadetrac-vehicle1"]="CaS-DETR/configs/dataset/main/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_uadetrac_vehicle1.yml"
+    ["cas-component-token-only-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-component-decoder-only-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-dynamic-base05-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-dynamic-base07-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic07_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-moe-cap05x-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-moe-cap1x-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-moe-cap2x-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-moe-cap4x-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap4x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
 )
 
-# MoE 专家数扫描：固定每个专家宽度和每 token 激活的专家数，只改变专家池规模
-# moe4 dim128 与容量扫描的 cap05x 是同一配置；两个入口组合时只运行一次
-declare -a CAS_MOE_EXPERT_SCAN_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe3_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe6_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-)
-
-# 只改变 MoE FFN 初始化；现有四容量配置分别作为随机 FFN 对照。
-declare -a CAS_MOE_FFN_INIT_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap05x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap1x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap2x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap4x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-)
-
-# 快速打包：base03_a10 moe4 主线（不含 keep*_fixed；固定 keep 见 CAS_FIXED_KEEP_RATIO_EXPERIMENTS）
-declare -a CAS_PACK_MOE4_BASE03_A10=(
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_uadetrac.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_moe4_only_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-)
-
-declare -A CaS_DETR_CONFIGS=(
-    ["casdeim-all-off-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_dairv2x.yml"
-    ["casdeim-moe4-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_moe4_only_hgnetv2_s_dairv2x.yml"
-    ["casdeim-cass-only-keep07-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_keep07_hgnetv2_s_dairv2x.yml"
-    ["casdeim-cass-only-keep05-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_keep05_hgnetv2_s_dairv2x.yml"
-    ["casdeim-moe4-cass-caip-base03-a10-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    ["casdeim-moe4-cass-caip-base03-a10-keep07-fixed-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x.yml"
-    ["casdeim-moe4-cass-caip-base03-a10-keep03-fixed-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x.yml"
-    ["casdeim-cass-only-caip-base03-a10-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_base03_a10_hgnetv2_s_dairv2x.yml"
-    ["casdeim-cass-only-caip-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_deim_cass_only_caip_hgnetv2_s_dairv2x.yml"
-)
+cas_result_group() {
+    case "$1" in
+        CaS-DETR/configs/dataset/main/*) echo "main" ;;
+        *cas_detr_token_only_*|*cas_detr_dense1_moe2_e4d128_only_*) echo "component_ablation" ;;
+        *cas_detr_dense1_moe2_e4d128_dynamic05_*|*cas_detr_dense1_moe2_e4d128_dynamic07_*) echo "dynamic_base" ;;
+        *cas_detr_moe4_cap05x_*|*cas_detr_moe4_cap1x_*|*cas_detr_moe4_cap2x_*|*cas_detr_moe4_cap4x_*) echo "moe_capacity" ;;
+        *) echo "" ;;
+    esac
+}
 
 # ── DQM-DETR 配置：消融实验（ablation 下） + 主实验（与 ablation 同级） ──
 #   模块消融 (module_ablation)：关闭单个模块观察精度变化
@@ -476,10 +536,6 @@ declare -A FASTER_RCNN_CONFIGS=(
     ["fasterrcnn-resnet50-uadetrac"]="yolo/configs/fasterrcnn_resnet50_uadetrac.yaml"
 )
 
-declare -A DEFORMABLE_DETR_CONFIGS=(
-    ["deformable-detr-r18"]="deformable-detr/train_deformable_r18.py"
-)
-
 declare -A DEIM_CONFIGS=(
     ["deim-s-dairv2x"]="DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x.yml"
     ["deim-s-uadetrac"]="DEIM/configs/deim_dfine/deim_hgnetv2_s_uadetrac.yml"
@@ -508,8 +564,8 @@ build_all_configs() {
         b="${b%.yml}"
         NAME_TO_PATH["$b"]="$p"
     done
-    for key in "${!CaS_DETR_CONFIGS[@]}"; do
-        local p="${CaS_DETR_CONFIGS[$key]}"
+    for key in "${!CAS_EXPERIMENT_CONFIGS[@]}"; do
+        local p="${CAS_EXPERIMENT_CONFIGS[$key]}"
         all_configs_paths+=("$p")
         local b
         _config_stem=$(basename "$p")
@@ -575,14 +631,6 @@ build_all_configs() {
         _config_stem=$(basename "$p")
         b="${_config_stem%.yaml}"
         b="${b%.yml}"
-        NAME_TO_PATH["$key"]="$p"
-        NAME_TO_PATH["$b"]="$p"
-    done
-    for key in "${!DEFORMABLE_DETR_CONFIGS[@]}"; do
-        local p="${DEFORMABLE_DETR_CONFIGS[$key]}"
-        all_configs_paths+=("$p")
-        local b
-        b=$(basename "$p" .py)
         NAME_TO_PATH["$key"]="$p"
         NAME_TO_PATH["$b"]="$p"
     done
@@ -675,6 +723,10 @@ parse_arguments() {
     build_all_configs
     SCOPE_DAIRV2X=false
     SCOPE_UADETRAC=false
+    DAIRV2X_VEHICLE5_MODE=true
+    UADETRAC_VEHICLE1_MODE=true
+    DEFAULT_ALL_PROTOCOLS=false
+    CAS_TOKEN_POLICY_TEST=false
     
     # 首先检查特殊标志（--test 和 backbone选择）
     local args=("$@")
@@ -703,6 +755,35 @@ parse_arguments() {
         if [ "$arg" == "--test" ]; then
             has_test=true
             TEST_MODE=true
+            idx=$((idx + 1))
+            continue
+        fi
+        if [ "$arg" == "--dry-run" ]; then
+            DRY_RUN=true
+            idx=$((idx + 1))
+            continue
+        fi
+        if [ "$arg" == "--dairv2x-vehicle5" ]; then
+            DAIRV2X_VEHICLE5_MODE=true
+            SCOPE_DAIRV2X=true
+            idx=$((idx + 1))
+            continue
+        fi
+        if [ "$arg" == "--dairv2x-vehicle8" ]; then
+            DAIRV2X_VEHICLE5_MODE=false
+            SCOPE_DAIRV2X=true
+            idx=$((idx + 1))
+            continue
+        fi
+        if [ "$arg" == "--uadetrac-vehicle1" ]; then
+            UADETRAC_VEHICLE1_MODE=true
+            SCOPE_UADETRAC=true
+            idx=$((idx + 1))
+            continue
+        fi
+        if [ "$arg" == "--uadetrac-vehicle4" ]; then
+            UADETRAC_VEHICLE1_MODE=false
+            SCOPE_UADETRAC=true
             idx=$((idx + 1))
             continue
         fi
@@ -755,10 +836,22 @@ parse_arguments() {
                 local cleaned="${ds//[[:space:]]/}"
                 if [ "$cleaned" = "dairv2x" ]; then
                     SCOPE_DAIRV2X=true
+                elif [ "$cleaned" = "dairv2x_vehicle5" ]; then
+                    DAIRV2X_VEHICLE5_MODE=true
+                    SCOPE_DAIRV2X=true
+                elif [ "$cleaned" = "dairv2x_vehicle8" ]; then
+                    DAIRV2X_VEHICLE5_MODE=false
+                    SCOPE_DAIRV2X=true
                 elif [ "$cleaned" = "uadetrac" ]; then
                     SCOPE_UADETRAC=true
+                elif [ "$cleaned" = "uadetrac_vehicle1" ]; then
+                    UADETRAC_VEHICLE1_MODE=true
+                    SCOPE_UADETRAC=true
+                elif [ "$cleaned" = "uadetrac_vehicle4" ]; then
+                    UADETRAC_VEHICLE1_MODE=false
+                    SCOPE_UADETRAC=true
                 elif [ -n "$cleaned" ]; then
-                    log_warning "忽略未知的数据集名（仅支持 dairv2x、uadetrac）: $cleaned"
+                    log_warning "忽略未知的数据集协议: $cleaned"
                 fi
             done
             idx=$((idx + 2))
@@ -768,8 +861,22 @@ parse_arguments() {
         idx=$((idx + 1))
     done
 
+    if [ "$SCOPE_DAIRV2X" != true ] && [ "$SCOPE_UADETRAC" != true ]; then
+        SCOPE_DAIRV2X=true
+    fi
+    if [ "$SCOPE_DAIRV2X" = true ]; then
+        [ "$DAIRV2X_VEHICLE5_MODE" = true ] \
+            && log_info "数据集协议: dairv2x_vehicle5" \
+            || log_info "数据集协议: dairv2x_vehicle8"
+    fi
+    if [ "$SCOPE_UADETRAC" = true ]; then
+        [ "$UADETRAC_VEHICLE1_MODE" = true ] \
+            && log_info "数据集协议: uadetrac_vehicle1" \
+            || log_info "数据集协议: uadetrac_vehicle4"
+    fi
+
     if [ "$SCOPE_DAIRV2X" = true ] || [ "$SCOPE_UADETRAC" = true ]; then
-log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），可与 --rt-detr、--cas_detr、--dqm_detr、--dqm_module_ablation、--dqm_degradation、--dqm_main 等任意顺序组合"
+        log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），可与 --rt-detr、--cas-main、--dqm_detr、--dqm_module_ablation、--dqm_degradation、--dqm_main 等任意顺序组合"
     fi
     if [ "$has_n" = true ] || [ "$has_s" = true ] || [ "$has_m" = true ]; then
         log_info "模型规模作用域已启用（--n / --s / --m）；推荐与 --yolo 或 --yolov5/--yolov8/--yolov12/--yolox 组合"
@@ -799,6 +906,10 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
     
     # 根据过滤后的参数决定运行哪些配置
     set -- "${filtered_args[@]}"
+    if [ "$DAIRV2X_VEHICLE5_MODE" = true ] \
+        && [ "$SCOPE_UADETRAC" != true ] && [ $# -eq 0 ]; then
+        DEFAULT_ALL_PROTOCOLS=true
+    fi
     
     # 过滤配置函数
     filter_config() {
@@ -828,62 +939,40 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         return 0
     }
     
-    # 检查是否有--core选项（优先处理）
-    for arg in "$@"; do
-        if [ "$arg" == "--core" ]; then
-            CONFIGS_TO_RUN=()
-            local _core_p
-            for _core_p in "${CORE_EXPERIMENTS[@]}"; do
-                if filter_config "$_core_p"; then
-                    CONFIGS_TO_RUN+=("$_core_p")
+    append_cas_group() {
+        local candidate existing already_added
+        for candidate in "$@"; do
+            filter_config "$candidate" || continue
+            already_added=false
+            for existing in "${CONFIGS_TO_RUN[@]}"; do
+                if [ "$existing" = "$candidate" ]; then
+                    already_added=true
+                    break
                 fi
             done
-            apply_dataset_scope_filter_to_configs
-            apply_model_size_filter_to_configs
-            log_info "运行核心实验配置（CaS_DETR R18 DAIR）"
-            return 0
-        fi
-    done
-
-    # CAIP 消融实验组（优先于常规类型选择）
-    for arg in "$@"; do
-        if [ "$arg" == "--cas_caip" ]; then
-            CONFIGS_TO_RUN=()
-            local _caip_p
-            for _caip_p in "${CAS_CAIP_EXPERIMENTS[@]}"; do
-                if filter_config "$_caip_p"; then
-                    CONFIGS_TO_RUN+=("$_caip_p")
-                fi
-            done
-            apply_dataset_scope_filter_to_configs
-            apply_model_size_filter_to_configs
-            log_info "运行 CAIP 消融实验组（4 个配置）"
-            return 0
-        fi
-    done
+            [ "$already_added" = true ] || CONFIGS_TO_RUN+=("$candidate")
+        done
+    }
     
     # 收集所有指定的实验类型（支持多个参数叠加）
     local has_rtdetrv2=false
-    local has_cas_detr=false
+    local has_cas_main=false
+    local has_cas_components=false
+    local has_cas_dynamic_base=false
+    local has_cas_moe_capacity=false
+    local has_cas_all_train=false
+    local has_cas_token_policy_test=false
     local has_dqm_detr=false
     local has_dqm_module_ablation=false
     local has_dqm_degradation=false
     local has_dqm_main=false
     local has_fq_dqm_prob=false
     local has_fq_dqm_fqm=false
-    local has_cas_caip=false
-    local has_cas_caip_base05=false
-    local has_cas_pack_moe4_base03_a10=false
-    local has_cas_fixed_keep_ratio=false
-    local has_cas_moe_capacity_scan=false
-    local has_cas_moe_expert_scan=false
-    local has_cas_moe_ffn_init=false
     local has_yolov5=false
     local has_yolov8=false
     local has_yolov12=false
     local has_yolox=false
     local has_fasterrcnn=false
-    local has_deformable_detr=false
     local has_deim=false
     local has_dfine=false
     
@@ -896,8 +985,23 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
                 log_warning "--rt-detr-finetune 已移除，请使用 --rtdetrv2"
                 has_rtdetrv2=true
                 ;;
-            --cas_detr)
-                has_cas_detr=true
+            --cas-main|--cas_main)
+                has_cas_main=true
+                ;;
+            --cas-components|--cas_components)
+                has_cas_components=true
+                ;;
+            --cas-dynamic-base|--cas_dynamic_base)
+                has_cas_dynamic_base=true
+                ;;
+            --cas-moe-capacity|--cas_moe_capacity)
+                has_cas_moe_capacity=true
+                ;;
+            --cas-all-train|--cas_all_train)
+                has_cas_all_train=true
+                ;;
+            --cas-token-policy-test|--cas_token_policy_test)
+                has_cas_token_policy_test=true
                 ;;
             --dqm_detr|--dqm-detr)
                 has_dqm_detr=true
@@ -916,27 +1020,6 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
                 ;;
             --fq_dqm_fqm|--fq-dqm-fqm|--fqdqmdfine-fqm)
                 has_fq_dqm_fqm=true
-                ;;
-            --cas_caip)
-                has_cas_caip=true
-                ;;
-            --cas_caip_base05|--cas-caip-base05|--cas_caip_base05_a10|--cas-caip-base05-a10)
-                has_cas_caip_base05=true
-                ;;
-            --cas_pack_moe4_base03_a10|--cas-pack-moe4-base03-a10)
-                has_cas_pack_moe4_base03_a10=true
-                ;;
-            --cas_fixed_keep_ratio|--cas-fixed-keep-ratio|--cas_moe4_base03_a10_fixed_keep|--cas-moe4-base03-a10-fixed-keep)
-                has_cas_fixed_keep_ratio=true
-                ;;
-            --cas_moe_capacity_scan|--cas-moe-capacity-scan|--cas_moe_ffn_scan|--cas-moe-ffn-scan)
-                has_cas_moe_capacity_scan=true
-                ;;
-            --cas_moe_expert_scan|--cas-moe-expert-scan|--cas_moe_num_experts_scan|--cas-moe-num-experts-scan)
-                has_cas_moe_expert_scan=true
-                ;;
-            --cas_moe_ffn_init|--cas-moe-ffn-init)
-                has_cas_moe_ffn_init=true
                 ;;
             --yolov5)
                 has_yolov5=true
@@ -959,9 +1042,6 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
             --fasterrcnn)
                 has_fasterrcnn=true
                 ;;
-            --deformable-detr)
-                has_deformable_detr=true
-                ;;
             --deim)
                 has_deim=true
                 ;;
@@ -972,30 +1052,27 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_detr" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_cas_caip" = true ] || [ "$has_cas_caip_base05" = true ] || [ "$has_cas_pack_moe4_base03_a10" = true ] || [ "$has_cas_fixed_keep_ratio" = true ] || [ "$has_cas_moe_capacity_scan" = true ] || [ "$has_cas_moe_expert_scan" = true ] || [ "$has_cas_moe_ffn_init" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deformable_detr" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_dynamic_base" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_cas_token_policy_test" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
-        [ "$has_cas_detr" = true ] && selected_types+=("CaS_DETR")
+        [ "$has_cas_main" = true ] && selected_types+=("CaS_Main")
+        [ "$has_cas_components" = true ] && selected_types+=("CaS_ComponentAblation")
+        [ "$has_cas_dynamic_base" = true ] && selected_types+=("CaS_DynamicBase")
+        [ "$has_cas_moe_capacity" = true ] && selected_types+=("CaS_MoECapacity")
+        [ "$has_cas_all_train" = true ] && selected_types+=("CaS_AllTrain")
+        [ "$has_cas_token_policy_test" = true ] && selected_types+=("CaS_TokenPolicyTest")
         [ "$has_dqm_detr" = true ] && selected_types+=("DQM_DETR(all)")
         [ "$has_dqm_module_ablation" = true ] && selected_types+=("DQM_ModuleAblation")
         [ "$has_dqm_degradation" = true ] && selected_types+=("DQM_Degradation")
         [ "$has_dqm_main" = true ] && selected_types+=("DQM_Main")
         [ "$has_fq_dqm_prob" = true ] && selected_types+=("FQ_DQM_DFINE_Prob")
         [ "$has_fq_dqm_fqm" = true ] && selected_types+=("FQ_DQM_DFINE_FQM")
-        [ "$has_cas_caip" = true ] && selected_types+=("CaS_DETR_CAIP")
-        [ "$has_cas_caip_base05" = true ] && selected_types+=("CaS_DETR_CAIP_rbase0.5_a1.0")
-        [ "$has_cas_pack_moe4_base03_a10" = true ] && selected_types+=("CaS_DETR_PACK_moe4_base03_a10")
-        [ "$has_cas_fixed_keep_ratio" = true ] && selected_types+=("CaS_DETR_FIXED_keep_ratio")
-        [ "$has_cas_moe_capacity_scan" = true ] && selected_types+=("CaS_DETR_MOE_CAPACITY_SCAN")
-        [ "$has_cas_moe_expert_scan" = true ] && selected_types+=("CaS_DETR_MOE_EXPERT_SCAN")
-        [ "$has_cas_moe_ffn_init" = true ] && selected_types+=("CaS_DETR_MOE_FFN_INIT")
         [ "$has_yolov5" = true ] && selected_types+=("YOLOv5")
         [ "$has_yolov8" = true ] && selected_types+=("YOLOv8")
         [ "$has_yolov12" = true ] && selected_types+=("YOLOv12")
         [ "$has_yolox" = true ] && selected_types+=("YOLOX")
         [ "$has_fasterrcnn" = true ] && selected_types+=("FasterRCNN")
-        [ "$has_deformable_detr" = true ] && selected_types+=("Deformable-DETR")
         [ "$has_deim" = true ] && selected_types+=("DEIM")
         [ "$has_dfine" = true ] && selected_types+=("D-FINE")
         local types_str=$(IFS='+'; echo "${selected_types[*]}")
@@ -1015,13 +1092,19 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
             done
         fi
         
-        if [ "$has_cas_detr" = true ]; then
-            for key in $(printf '%s\n' "${!CaS_DETR_CONFIGS[@]}" | sort); do
-                local p="${CaS_DETR_CONFIGS[$key]}"
-                if filter_config "$p"; then
-                    CONFIGS_TO_RUN+=("$p")
-                fi
-            done
+        if [ "$has_cas_all_train" = true ]; then
+            has_cas_main=true
+            has_cas_components=true
+            has_cas_dynamic_base=true
+            has_cas_moe_capacity=true
+        fi
+
+        [ "$has_cas_main" = true ] && append_cas_group "${CAS_MAIN_EXPERIMENTS[@]}"
+        [ "$has_cas_components" = true ] && append_cas_group "${CAS_COMPONENT_ABLATION_EXPERIMENTS[@]}"
+        [ "$has_cas_dynamic_base" = true ] && append_cas_group "${CAS_DYNAMIC_BASE_ABLATION_EXPERIMENTS[@]}"
+        [ "$has_cas_moe_capacity" = true ] && append_cas_group "${CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS[@]}"
+        if [ "$has_cas_token_policy_test" = true ]; then
+            CAS_TOKEN_POLICY_TEST=true
         fi
 
         if [ "$has_dqm_detr" = true ]; then
@@ -1078,75 +1161,6 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
             done
         fi
 
-        if [ "$has_cas_caip" = true ]; then
-            local _p
-            for _p in "${CAS_CAIP_EXPERIMENTS[@]}"; do
-                if filter_config "$_p"; then
-                    CONFIGS_TO_RUN+=("$_p")
-                fi
-            done
-        fi
-
-        if [ "$has_cas_caip_base05" = true ]; then
-            local _p
-            for _p in "${CAS_CAIP_BASE05_EXPERIMENTS[@]}"; do
-                if filter_config "$_p"; then
-                    CONFIGS_TO_RUN+=("$_p")
-                fi
-            done
-        fi
-
-        if [ "$has_cas_pack_moe4_base03_a10" = true ]; then
-            local _p
-            for _p in "${CAS_PACK_MOE4_BASE03_A10[@]}"; do
-                if filter_config "$_p"; then
-                    CONFIGS_TO_RUN+=("$_p")
-                fi
-            done
-        fi
-
-        if [ "$has_cas_fixed_keep_ratio" = true ]; then
-            local _p
-            for _p in "${CAS_FIXED_KEEP_RATIO_EXPERIMENTS[@]}"; do
-                if filter_config "$_p"; then
-                    CONFIGS_TO_RUN+=("$_p")
-                fi
-            done
-        fi
-
-        if [ "$has_cas_moe_capacity_scan" = true ]; then
-            local _p
-            for _p in "${CAS_MOE_CAPACITY_SCAN_EXPERIMENTS[@]}"; do
-                if [ "${CAS_SKIP_SHARED_MOE4:-0}" = "1" ] && [[ "$_p" == *"moe4_cap05x"* ]]; then
-                    continue
-                fi
-                if filter_config "$_p"; then
-                    CONFIGS_TO_RUN+=("$_p")
-                fi
-            done
-        fi
-
-        if [ "$has_cas_moe_expert_scan" = true ]; then
-            local _p
-            for _p in "${CAS_MOE_EXPERT_SCAN_EXPERIMENTS[@]}"; do
-                if [ "$has_cas_moe_capacity_scan" = true ] && [[ "$_p" == *"moe4_cap05x"* ]]; then
-                    continue
-                fi
-                if filter_config "$_p"; then
-                    CONFIGS_TO_RUN+=("$_p")
-                fi
-            done
-        fi
-
-        if [ "$has_cas_moe_ffn_init" = true ]; then
-            local _p
-            for _p in "${CAS_MOE_FFN_INIT_EXPERIMENTS[@]}"; do
-                if filter_config "$_p"; then
-                    CONFIGS_TO_RUN+=("$_p")
-                fi
-            done
-        fi
-
         if [ "$has_yolov5" = true ]; then
             for key in $(printf '%s\n' "${!YOLOV5_CONFIGS[@]}" | sort); do
                 local p="${YOLOV5_CONFIGS[$key]}"
@@ -1184,15 +1198,6 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
             done
         fi
 
-        if [ "$has_deformable_detr" = true ]; then
-            for key in $(printf '%s\n' "${!DEFORMABLE_DETR_CONFIGS[@]}" | sort); do
-                local p="${DEFORMABLE_DETR_CONFIGS[$key]}"
-                if filter_config "$p"; then
-                    CONFIGS_TO_RUN+=("$p")
-                fi
-            done
-        fi
-
         if [ "$has_deim" = true ]; then
             for key in $(printf '%s\n' "${!DEIM_CONFIGS[@]}" | sort); do
                 local p="${DEIM_CONFIGS[$key]}"
@@ -1220,9 +1225,9 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
                 CONFIGS_TO_RUN+=("$p")
             fi
         done
-        # CaS-DETR 第一阶段实验（按字典序）
-        for key in $(printf '%s\n' "${!CaS_DETR_CONFIGS[@]}" | sort); do
-            local p="${CaS_DETR_CONFIGS[$key]}"
+        # CaS-DETR 已拆分的主实验与消融配置（按字典序）
+        for key in $(printf '%s\n' "${!CAS_EXPERIMENT_CONFIGS[@]}" | sort); do
+            local p="${CAS_EXPERIMENT_CONFIGS[$key]}"
             if filter_config "$p"; then
                 CONFIGS_TO_RUN+=("$p")
             fi
@@ -1260,13 +1265,6 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
             local p="${FASTER_RCNN_CONFIGS[$key]}"
             CONFIGS_TO_RUN+=("$p")
         done
-        # Deformable-DETR实验
-        for key in $(printf '%s\n' "${!DEFORMABLE_DETR_CONFIGS[@]}" | sort); do
-            local p="${DEFORMABLE_DETR_CONFIGS[$key]}"
-            if filter_config "$p"; then
-                CONFIGS_TO_RUN+=("$p")
-            fi
-        done
     elif [ "$1" == "--custom" ]; then
         log_info "使用自定义配置列表"
         shift
@@ -1292,7 +1290,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         local i=1
         for cfg in "${all_configs_paths[@]}"; do
             echo -e "  ${CYAN}[$i]${NC} $cfg"
-            ((i++))
+            i=$((i + 1))
         done
         read -p "请输入要运行的序号(支持逗号与区间，如 1,3-5): " selection
         select_by_indices all_configs_paths "$selection"
@@ -1330,19 +1328,18 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         echo "  ./run_batch_experiments.sh --test                          # 测试模式：所有配置各跑2个epoch"
         echo "  ./run_batch_experiments.sh --rt-detr                       # 与 --rtdetrv2 相同，仅 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --rtdetrv2                      # 官方 rtdetrv2_pytorch + train_adapter（默认 --cas-eval）"
-        echo "  ./run_batch_experiments.sh --cas_detr                      # 只运行新的 CaS-DETR 第一阶段消融（仅 DAIR-V2X）"
+        echo "  ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac  # DEIM baseline 与 CaS 主实验"
+        echo "  ./run_batch_experiments.sh --cas-main --dataset dairv2x,uadetrac  # CaS 主实验：D5 .3 与 U1 .5"
+        echo "  ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only"
+        echo "  ./run_batch_experiments.sh --cas-dynamic-base --dairv2x    # DAIR dynamic base .5/.7（.3 复用主实验）"
+        echo "  ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x"
+        echo "  ./run_batch_experiments.sh --cas-all-train --dairv2x       # 全部 DAIR CaS 训练组"
+        echo "  CAS_TOKEN_POLICY_CONFIG=<full.yml> CAS_TOKEN_POLICY_CHECKPOINT=<best.pth> ./run_batch_experiments.sh --cas-token-policy-test"
         echo "  ./run_batch_experiments.sh --dqm_detr                      # DQM-DETR 全部消融+主实验（3 数据集 × 消融 + 主实验）"
         echo "  ./run_batch_experiments.sh --dqm_module_ablation           # 仅 DQM 模块消融（all_off / wo_dqm / wo_qmqc / degradation_only）"
         echo "  ./run_batch_experiments.sh --dqm_degradation               # 仅 DQM 退化消融（full_default / mild / strong / no_fog / no_noise_blur）"
         echo "  ./run_batch_experiments.sh --dqm_main                     # 仅 DQM 主实验（dqm05/15 / qmqc025/100）"
         echo "  ./run_batch_experiments.sh --dqm_detr --dairv2x             # DQM 全部消融+主实验仅限于 DAIR-V2X"
-        echo "  ./run_batch_experiments.sh --cas_caip                      # 只运行 CAIP 消融（4 个配置）"
-        echo "  ./run_batch_experiments.sh --cas_caip_base05               # 只运行 CAIP 消融：r_base=0.5, alpha=1.0（4 个配置，DAIR+UA）"
-        echo "  ./run_batch_experiments.sh --cas_pack_moe4_base03_a10      # moe4 base03_a10 打包（不含 keep 固定分支）"
-        echo "  ./run_batch_experiments.sh --cas_fixed_keep_ratio          # 仅 DAIR：moe4 base03_a10 keep0.3、0.7 固定（独立入口）"
-        echo "  ./run_batch_experiments.sh --cas_moe_capacity_scan         # MoE 容量扫描：0.5x/1x/2x/4x（experts=4、top_k=2，仅 DAIR）"
-        echo "  ./run_batch_experiments.sh --cas_moe_expert_scan           # MoE 专家数扫描：3/4/6（dim_ff=128、top_k=2，仅 DAIR）"
-        echo "  ./run_batch_experiments.sh --cas_moe_ffn_init              # 0.5x/1x/2x/4x MoE 的 4x FFN 初始化"
         echo "  ./run_batch_experiments.sh --yolov5                        # 只运行YOLOv5"
         echo "  ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8"
         echo "  ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12"
@@ -1353,9 +1350,8 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         echo "  ./run_batch_experiments.sh --fasterrcnn                    # 只运行 torchvision Faster R-CNN"
         echo "  ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）"
         echo "  ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）"
-        echo "  ./run_batch_experiments.sh --deformable-detr               # 只运行Deformable-DETR"
         echo "  ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2"
-        echo "  ./run_batch_experiments.sh --test --cas_detr               # 测试模式只运行 CaS-DETR"
+        echo "  ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验"
         echo "  ./run_batch_experiments.sh --test --dqm_detr               # 测试模式：DQM 全部消融+主实验"
         echo "  ./run_batch_experiments.sh --test --dqm_module_ablation    # 测试模式：DQM 模块消融"
         echo "  ./run_batch_experiments.sh --test --dqm_degradation        # 测试模式：DQM 退化消融"
@@ -1365,9 +1361,8 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         echo "  ./run_batch_experiments.sh --test --yolov12                # 测试模式只运行YOLOv12"
         echo "  ./run_batch_experiments.sh --test --yolox                  # 测试模式只运行 YOLOX"
         echo "  ./run_batch_experiments.sh --test --fasterrcnn             # 测试模式只运行 Faster R-CNN"
-        echo "  ./run_batch_experiments.sh --test --deformable-detr        # 测试模式只运行Deformable-DETR"
-        echo "  ./run_batch_experiments.sh --rtdetrv2 --cas_detr --dqm_detr           # 运行多个实验类型（可叠加）"
-        echo "  ./run_batch_experiments.sh --test --rtdetrv2 --cas_detr --dqm_detr      # 测试模式运行多个类型"
+        echo "  ./run_batch_experiments.sh --rtdetrv2 --cas-main --dqm_detr           # 运行多个实验类型（可叠加）"
+        echo "  ./run_batch_experiments.sh --test --rtdetrv2 --cas-main --dqm_detr      # 测试模式运行多个类型"
         echo "  ./run_batch_experiments.sh --dqm_module_ablation --dqm_degradation      # DQM 模块消融 + 退化消融"
         echo "  ./run_batch_experiments.sh --r18                           # 只运行R18"
         echo "  ./run_batch_experiments.sh --r18                           # 只运行R18"
@@ -1376,21 +1371,24 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
         echo "  ./run_batch_experiments.sh --m                             # 只运行所有 m 规模 YOLO / YOLOX"
         echo "  ./run_batch_experiments.sh --k0.5                          # 只跑路径名含 ratio0.5 的配置"
         echo "  ./run_batch_experiments.sh --k0.7                          # 只运行 Keep Ratio 0.7"
-        echo "  ./run_batch_experiments.sh --core                          # 只运行核心实验（CaS-DETR moe+cass, DAIR）"
         echo "  ./run_batch_experiments.sh --custom cfg1.yaml cfg2.yaml    # 指定配置文件路径"
-        echo "  ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x casdeim-moe-only-dairv2x   # 通过键名选择"
+        echo "  ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x cas-component-decoder-only-dairv2x-vehicle5  # 通过键名选择"
         echo "  ./run_batch_experiments.sh --dairv2x                       # 数据集筛：仅 DAIR-V2X（可叠 --rtdetrv2 等）"
         echo "  ./run_batch_experiments.sh --uadetrac                      # 数据集筛：仅 UA-DETRAC"
         echo "  ./run_batch_experiments.sh --dataset dairv2x --rtdetrv2     # 推荐：数据集 + 实验类型（顺序任意；--rt-detr 同 --rtdetrv2）"
         echo "  ./run_batch_experiments.sh --dataset dairv2x,uadetrac       # 同传 --dairv2x --uadetrac（不筛）"
+        echo "  ./run_batch_experiments.sh                                  # 默认 Vehicle5 全部主模型"
+        echo "  ./run_batch_experiments.sh --dairv2x-vehicle8               # DAIR-V2X 旧 8 类协议"
+        echo "  ./run_batch_experiments.sh --uadetrac-vehicle4              # UA-DETRAC 旧 4 类协议"
+        echo "  ./run_batch_experiments.sh --dry-run --uadetrac --yolo --s  # 查看 UA Vehicle1 队列"
         echo "  ./run_batch_experiments.sh --select                        # 交互式选择"
         echo "  ./run_batch_experiments.sh --rerun-failed [LOG_DIR]        # 重跑失败实验"
-        echo "  ./run_batch_experiments.sh --yes --cas_detr                 # 非交互一键跑 CaS-DETR"
+        echo "  ./run_batch_experiments.sh --yes --cas-main --dairv2x       # 非交互运行 DAIR CaS 主实验"
         echo "  ./run_batch_experiments.sh --yes --dqm_detr                 # 非交互一键跑 DQM-DETR 全部消融+主实验"
         echo "  ./run_batch_experiments.sh --yes --dqm_module_ablation      # 非交互一键跑 DQM 模块消融"
         echo "  ./run_batch_experiments.sh --dairv2x --rtdetrv2             # 仅 DAIR-V2X 的 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --dataset dairv2x --rtdetr       # 同上（--dataset 写法）"
-        echo "  ./run_batch_experiments.sh --dairv2x --cas_detr             # 仅 DAIR-V2X 的 CaS-DETR 第一阶段消融"
+        echo "  ./run_batch_experiments.sh --dairv2x --cas-components       # 仅 DAIR-V2X 的 CaS 组件消融"
         echo "  ./run_batch_experiments.sh --yolo --s                      # 同上（推荐简写）"
         echo "  ./run_batch_experiments.sh --yolov5 --yolov8 --yolov12 --yolox --s  # 跑所有 s 规模 YOLO / YOLOX"
         exit 1
@@ -1398,6 +1396,7 @@ log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），
 
     apply_dataset_scope_filter_to_configs
     apply_model_size_filter_to_configs
+    apply_default_protocols_to_configs
 }
 
 # 运行单个实验
@@ -1410,6 +1409,15 @@ run_single_experiment() {
         config_path="${config_path_raw%%@*}"
         rtdetr_adapter_dataset="${config_path_raw#*@}"
     fi
+    local experiment_protocol="dairv2x_vehicle8"
+    if [[ "$config_path_raw" == *uadetrac* ]] || [ "$rtdetr_adapter_dataset" = "uadetrac" ]; then
+        experiment_protocol="uadetrac_vehicle4"
+        [ "$UADETRAC_VEHICLE1_MODE" = true ] \
+            && experiment_protocol="uadetrac_vehicle1"
+    elif [ "$DAIRV2X_VEHICLE5_MODE" = true ]; then
+        experiment_protocol="dairv2x_vehicle5"
+    fi
+    export EXPERIMENT_DATASET_PROTOCOL="$experiment_protocol"
     local exp_name
     exp_name=$(basename "$config_path")
     exp_name="${exp_name%.*}"
@@ -1419,7 +1427,7 @@ run_single_experiment() {
     fi
     local exp_dir=$(dirname "$config_path")
     
-    # 检查配置文件是否存在（Deformable-DETR 使用 Python 脚本；路径相对 experiments 根目录）
+    # 检查配置文件是否存在（路径相对 experiments 根目录）
     if [ ! -f "$SCRIPT_DIR/$config_path" ]; then
         if [[ "$config_path" == *.py ]]; then
             log_error "训练脚本不存在: $config_path"
@@ -1448,13 +1456,24 @@ run_single_experiment() {
         set +e
         local yml_rel="${config_path#RT-DETR/rtdetrv2_pytorch/}"
         local out_tag="batch_${exp_name}_${rtdetr_adapter_dataset}"
+        local rtdetr_output_rel="outputs/${experiment_protocol}/${out_tag}"
         local adapter_cmd=(
             "$PYTHON_BIN" tools/train_adapter.py
             -c "$yml_rel"
             --dataset "$rtdetr_adapter_dataset"
+            --seed "$EXPERIMENT_SEED"
             --output-dir "outputs/${out_tag}"
             --experiment-name "${exp_name}_${rtdetr_adapter_dataset}"
         )
+        if [ "$experiment_protocol" = "dairv2x_vehicle5" ]; then
+            adapter_cmd+=(--dairv2x-vehicle5)
+        elif [ "$experiment_protocol" = "dairv2x_vehicle8" ]; then
+            adapter_cmd+=(--dairv2x-vehicle8)
+        elif [ "$experiment_protocol" = "uadetrac_vehicle1" ]; then
+            adapter_cmd+=(--uadetrac-vehicle1)
+        else
+            adapter_cmd+=(--uadetrac-vehicle4)
+        fi
         if [ "${RTDETRV2_CAS_EVAL:-1}" != "0" ]; then
             adapter_cmd+=(--cas-eval)
         fi
@@ -1479,13 +1498,19 @@ run_single_experiment() {
         local duration=$((end_time - start_time))
         local duration_formatted=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
         if [ $exit_code -eq 0 ]; then
-            run_trt_benchmark_for_eval \
+            if run_trt_benchmark_for_eval \
                 "rtdetr" \
-                "RT-DETR/rtdetrv2_pytorch/outputs/${out_tag}/config.yml" \
-                "RT-DETR/rtdetrv2_pytorch/outputs/${out_tag}" \
-                "${exp_name}@${rtdetr_adapter_dataset}"
-            log_success "✓ RT-DETRv2 完成: ${exp_name}@${rtdetr_adapter_dataset} (耗时: $duration_formatted)"
-            SUCCESSFUL_EXPERIMENTS=$((SUCCESSFUL_EXPERIMENTS + 1))
+                "RT-DETR/rtdetrv2_pytorch/${rtdetr_output_rel}/config.yml" \
+                "RT-DETR/rtdetrv2_pytorch/${rtdetr_output_rel}" \
+                "${exp_name}@${rtdetr_adapter_dataset}" \
+                "$out_tag"; then
+                log_success "✓ RT-DETRv2 完成: ${exp_name}@${rtdetr_adapter_dataset} (耗时: $duration_formatted)"
+                SUCCESSFUL_EXPERIMENTS=$((SUCCESSFUL_EXPERIMENTS + 1))
+            else
+                exit_code=1
+                log_error "✗ RT-DETRv2 TensorRT/报告链路失败: ${exp_name}@${rtdetr_adapter_dataset}"
+                FAILED_EXPERIMENTS=$((FAILED_EXPERIMENTS + 1))
+            fi
         else
             log_error "✗ RT-DETRv2 | ${exp_name}@${rtdetr_adapter_dataset} 失败 (退出码: $exit_code, 耗时: $duration_formatted)"
             FAILED_EXPERIMENTS=$((FAILED_EXPERIMENTS + 1))
@@ -1538,10 +1563,6 @@ run_single_experiment() {
     elif [[ "$config_path" == DQM-DETR/* ]]; then
         TRAIN_SCRIPT="train.py"
         WORK_DIR="DQM-DETR"
-    elif [[ "$exp_dir" == *"deformable-detr"* ]]; then
-        # Deformable-DETR 使用 Python 脚本而不是 YAML 配置
-        TRAIN_SCRIPT="deformable-detr/train_deformable_r18.py"
-        WORK_DIR="deformable-detr"
     else
         TRAIN_SCRIPT="train.py"
         WORK_DIR="CaS-DETR"
@@ -1569,6 +1590,11 @@ run_single_experiment() {
         [[ "$WORK_DIR" == "DQM-DETR" ]] && fw_flag="dqmdeim"
         [[ "$WORK_DIR" == "D-FINE" ]] && fw_flag="dfine"
         local yml_rel="${config_path#${WORK_DIR}/}"  # e.g. configs/deim_dfine/deim_hgnetv2_s_dairv2x.yml
+        local protocol_arg="--${experiment_protocol//_/-}"
+        local reproducibility_args=()
+        if [[ "$WORK_DIR" == "DEIM" ]] || [[ "$WORK_DIR" == "CaS-DETR" ]] || [[ "$WORK_DIR" == "D-FINE" ]]; then
+            reproducibility_args=(--seed "$EXPERIMENT_SEED")
+        fi
 
         local pretrained_arg=""
         if [[ "$WORK_DIR" == "DEIM" ]] && [[ -n "${DEIM_TUNING_CKPT:-}" ]]; then
@@ -1584,7 +1610,9 @@ run_single_experiment() {
 
         local resume_arg=""
         local model_output_rel
-        model_output_rel=$("$PYTHON_BIN" -c 'import sys,yaml; print((yaml.safe_load(open(sys.argv[1])) or {}).get("output_dir", ""))' "$yml_rel")
+        model_output_rel=$("$PYTHON_BIN" -c \
+            'import sys; sys.path.insert(0, sys.argv[1]); from common.dataset_protocol import protocol_output_dir; print(protocol_output_dir(sys.argv[2], sys.argv[3]))' \
+            "$SCRIPT_DIR" "$yml_rel" "$experiment_protocol")
         if [ -n "$model_output_rel" ] && [ -f "$model_output_rel/last.pth" ]; then
             resume_arg="-r $model_output_rel/last.pth"
             pretrained_arg=""
@@ -1593,58 +1621,77 @@ run_single_experiment() {
 
         if [ "$TEST_MODE" = true ]; then
             if [ -n "$resume_arg" ]; then
-                "$PYTHON_BIN" train.py -c "$yml_rel" $resume_arg -u tuning=null epoches=2
+                "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $resume_arg -u tuning=null epoches=2
             else
-                "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg -u epoches=2
+                "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $pretrained_arg -u epoches=2
             fi
         elif [ -n "$resume_arg" ]; then
-            "$PYTHON_BIN" train.py -c "$yml_rel" $resume_arg -u tuning=null
+            "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $resume_arg -u tuning=null
         else
-            "$PYTHON_BIN" train.py -c "$yml_rel" $pretrained_arg
+            "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $pretrained_arg
         fi
         local train_exit=$?
 
-        # 训练成功后，运行 CaS 兼容评估
-        if [ $train_exit -eq 0 ] && [ "$TEST_MODE" != true ]; then
+        # 训练成功后（包括 2-epoch smoke run），运行统一评估和 TensorRT。
+        # 评估、FP16 engine、model/end-to-end 测速或 reports 同步任一失败，整个实验失败。
+        if [ $train_exit -eq 0 ]; then
             cd "$original_dir"
             log_info "运行 CaS 兼容评估: $config_path"
-            "$PYTHON_BIN" common/eval_deim_dfine.py \
-                --framework "$fw_flag" \
-                --config "$config_path" \
-                --model-name "$exp_name" \
-                --device cuda 2>&1 || log_warning "CaS 评估失败（不影响训练结果）"
-            if [ -n "$model_output_rel" ]; then
-                run_trt_benchmark_for_eval "$fw_flag" "$config_path" "$WORK_DIR/${model_output_rel#./}" "$exp_name"
+            local eval_args=(
+                "$PYTHON_BIN" common/eval_deim_dfine.py
+                --framework "$fw_flag"
+                --config "$config_path"
+                --model-name "$exp_name"
+                "$protocol_arg"
+                --splits test
+                --device cuda
+            )
+            if [ ${#reproducibility_args[@]} -gt 0 ]; then
+                eval_args+=(--seed "$EXPERIMENT_SEED")
+            fi
+            if [ "$fw_flag" = "casdeim" ]; then
+                local cas_group
+                cas_group=$(cas_result_group "$config_path")
+            fi
+            local eval_run_id
+            eval_run_id="$(basename "$(dirname "$model_output_rel")")/$(basename "$model_output_rel")"
+            if [ -n "${cas_group:-}" ]; then
+                eval_run_id="$cas_group/$exp_name"
+            fi
+            eval_args+=(--run-id "$eval_run_id")
+            if ! "${eval_args[@]}" 2>&1; then
+                log_error "CaS 兼容评估或 reports 写入失败: $config_path"
+                train_exit=1
+            elif [ -z "$model_output_rel" ]; then
+                log_error "TensorRT benchmark 无法解析输出目录: $config_path"
+                train_exit=1
+            elif ! run_trt_benchmark_for_eval \
+                "$fw_flag" "$config_path" "$WORK_DIR/${model_output_rel#./}" "$exp_name" "$eval_run_id"; then
+                train_exit=1
             fi
             cd "$WORK_DIR"
         fi
 
-    # Deformable-DETR 使用 Python 脚本，不需要 --config 参数
-    elif [[ "$exp_dir" == *"deformable-detr"* ]]; then
-        # 如果是测试模式，传递 --epochs 2 参数
-        if [ "$TEST_MODE" = true ]; then
-            "$PYTHON_BIN" train_deformable_r18.py --epochs 2
-        else
-            "$PYTHON_BIN" train_deformable_r18.py
-        fi
     # 其他实验使用 YAML 配置文件
     elif [[ "$TRAIN_SCRIPT" == *train_yolox.py* ]] && [ "$TEST_MODE" = true ]; then
-        "$PYTHON_BIN" train_yolox.py --config "../$config_path" --epochs 2
+        local yolox_dataset_args=()
+        yolox_dataset_args=("--${experiment_protocol//_/-}")
+        "$PYTHON_BIN" train_yolox.py --config "../$config_path" "${yolox_dataset_args[@]}" --epochs 2
     elif [[ "$TRAIN_SCRIPT" == *train_yolox.py* ]]; then
-        "$PYTHON_BIN" train_yolox.py --config "../$config_path"
+        local yolox_dataset_args=()
+        yolox_dataset_args=("--${experiment_protocol//_/-}")
+        "$PYTHON_BIN" train_yolox.py --config "../$config_path" "${yolox_dataset_args[@]}"
     elif [[ "$exp_name" == fasterrcnn* ]] && [ "$TEST_MODE" = true ]; then
-        local FRCNN_DS="dairv2x"
-        [[ "$exp_name" == *uadetrac* ]] && FRCNN_DS="uadetrac"
+        local FRCNN_DS="$experiment_protocol"
         "$PYTHON_BIN" train_fasterrcnn.py --config "../$config_path" --dataset "$FRCNN_DS" --epochs 2
     elif [[ "$exp_name" == fasterrcnn* ]]; then
-        local FRCNN_DS="dairv2x"
-        [[ "$exp_name" == *uadetrac* ]] && FRCNN_DS="uadetrac"
+        local FRCNN_DS="$experiment_protocol"
         "$PYTHON_BIN" train_fasterrcnn.py --config "../$config_path" --dataset "$FRCNN_DS"
     elif [ -n "$YOLO_VERSION" ] && [ "$TEST_MODE" = true ]; then
         if [ "${SKIP_COMPLETED_YOLO_RUNS:-1}" = "1" ]; then
             local yolo_log_root="$SCRIPT_DIR/yolo/logs"
             local yolo_dataset_dir="$yolo_log_root/dairv2x"
-            [[ "$config_path" == *uadetrac* ]] && yolo_dataset_dir="$yolo_log_root/uadetrac"
+            yolo_dataset_dir="$yolo_log_root/$experiment_protocol"
             # Historical YOLO run directories use the model-only prefix
             # (e.g. yolo_yolov5m_<timestamp>), while queue keys include the
             # dataset suffix (yolov5m_dairv2x). Match the stable model name.
@@ -1659,12 +1706,14 @@ run_single_experiment() {
                 return 0
             fi
         fi
-        "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" --epochs 2
+        local yolo_dataset_args=()
+        yolo_dataset_args=("--${experiment_protocol//_/-}")
+        "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" "${yolo_dataset_args[@]}" --epochs 2
     elif [ -n "$YOLO_VERSION" ]; then
         if [ "${SKIP_COMPLETED_YOLO_RUNS:-1}" = "1" ]; then
             local yolo_log_root="$SCRIPT_DIR/yolo/logs"
             local yolo_dataset_dir="$yolo_log_root/dairv2x"
-            [[ "$config_path" == *uadetrac* ]] && yolo_dataset_dir="$yolo_log_root/uadetrac"
+            yolo_dataset_dir="$yolo_log_root/$experiment_protocol"
             local yolo_prefix="yolo_${exp_name%%_*}_"
             local completed_run
             completed_run=$(find "$yolo_dataset_dir" -maxdepth 1 -type d -name "${yolo_prefix}*" 2>/dev/null | while read -r d; do
@@ -1676,18 +1725,23 @@ run_single_experiment() {
                 return 0
             fi
         fi
-        "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path"
+        local yolo_dataset_args=()
+        yolo_dataset_args=("--${experiment_protocol//_/-}")
+        "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" "${yolo_dataset_args[@]}"
     elif [ "$TEST_MODE" = true ]; then
         "$PYTHON_BIN" train.py --config "../$config_path" --epochs 2
     else
         "$PYTHON_BIN" train.py --config "../$config_path"
     fi
     
-    # DEIM/CaS-DETR/DQM-DETR/D-FINE 在 if 分支内已有 train_exit；其余分支用 $?
+    # 必须在执行任何新的条件判断前保存训练分支退出码。
+    # 否则 `[[ ... ]]` 自身的状态会覆盖 YOLO/Faster R-CNN 的真实结果。
+    local command_exit=$?
+    local exit_code
     if [[ "$WORK_DIR" == "DEIM" ]] || [[ "$WORK_DIR" == "CaS-DETR" ]] || [[ "$WORK_DIR" == "DQM-DETR" ]] || [[ "$WORK_DIR" == "D-FINE" ]]; then
-        local exit_code=${train_exit:-$?}
+        exit_code=$train_exit
     else
-        local exit_code=$?
+        exit_code=$command_exit
     fi
     set -e
     cd "$original_dir"
@@ -1715,6 +1769,121 @@ run_single_experiment() {
     return $exit_code
 }
 
+run_cas_token_policy_test() {
+    [ "$CAS_TOKEN_POLICY_TEST" = true ] || return 0
+
+    if [ "$TEST_MODE" = true ]; then
+        log_error "--cas-token-policy-test 是 checkpoint test-only 评测，不能与 --test（2 epoch smoke training）同时使用"
+        FAILED_EXPERIMENTS=$((FAILED_EXPERIMENTS + 1))
+        return 1
+    fi
+    if [ "$SCOPE_UADETRAC" = true ] && [ "$SCOPE_DAIRV2X" != true ]; then
+        log_error "--cas-token-policy-test 仅适用于 DAIR Vehicle5"
+        FAILED_EXPERIMENTS=$((FAILED_EXPERIMENTS + 1))
+        return 1
+    fi
+
+    local config_path="${CAS_TOKEN_POLICY_CONFIG:-}"
+    local checkpoint="${CAS_TOKEN_POLICY_CHECKPOINT:-}"
+    if [ -z "$config_path" ] || [ -z "$checkpoint" ]; then
+        log_error "--cas-token-policy-test 需要 CAS_TOKEN_POLICY_CONFIG=<获胜 full YAML> 和 CAS_TOKEN_POLICY_CHECKPOINT=<best.pth>"
+        FAILED_EXPERIMENTS=$((FAILED_EXPERIMENTS + 1))
+        return 1
+    fi
+    if [ ! -f "$config_path" ]; then
+        config_path="$SCRIPT_DIR/$config_path"
+    fi
+    if [ ! -f "$checkpoint" ]; then
+        checkpoint="$SCRIPT_DIR/$checkpoint"
+    fi
+    if [ ! -f "$config_path" ] || [ ! -f "$checkpoint" ]; then
+        log_error "token policy test 的配置或 checkpoint 不存在: $config_path | $checkpoint"
+        FAILED_EXPERIMENTS=$((FAILED_EXPERIMENTS + 1))
+        return 1
+    fi
+
+    local source_name
+    source_name=$(basename "$config_path")
+    source_name="${source_name%.yaml}"
+    source_name="${source_name%.yml}"
+    local policy_root="$SCRIPT_DIR/CaS-DETR/outputs/dairv2x_vehicle5/token_policy_test/$source_name"
+    local policy_name policy_ratio failed=false
+    local -a policy_names=("dynamic" "fixed_keep03" "fixed_keep07" "fixed_keep100")
+    local -a policy_ratios=("" "0.3" "0.7" "1.0")
+
+    log_info "运行 token policy test：同一 checkpoint 的 dynamic 与 fixed .3/.7/1.0（仅 test）"
+    for ((policy_index=0; policy_index<${#policy_names[@]}; policy_index++)); do
+        policy_name="${policy_names[$policy_index]}"
+        policy_ratio="${policy_ratios[$policy_index]}"
+        TOTAL_EXPERIMENTS=$((TOTAL_EXPERIMENTS + 1))
+        echo ""
+        echo -e "${PURPLE}========================================${NC}"
+        echo -e "${PURPLE}评测 [$TOTAL_EXPERIMENTS/$TOTAL_PLANNED_RUNS]: $source_name / $policy_name${NC}"
+        echo -e "${PURPLE}========================================${NC}"
+
+        local policy_dir="$policy_root/$policy_name"
+        local eval_args=(
+            "$PYTHON_BIN" "$SCRIPT_DIR/common/eval_deim_dfine.py"
+            --framework casdeim
+            --config "$config_path"
+            --resume "$checkpoint"
+            --model-name "${source_name}__${policy_name}"
+            --run-id "token_policy_test/${source_name}/${policy_name}"
+            --dairv2x-vehicle5
+            --splits test
+            --seed "$EXPERIMENT_SEED"
+            --predictions-dir "$policy_dir"
+            --router-stats "$policy_dir/router_stats.json"
+            --device cuda
+        )
+        if [ -n "$policy_ratio" ]; then
+            eval_args+=(--caip-static-keep-eval --caip-eval-keep-ratio "$policy_ratio")
+        fi
+
+        local policy_run_id="token_policy_test/${source_name}/${policy_name}"
+        if ! "${eval_args[@]}"; then
+            log_error "✗ token policy test 失败: $policy_name"
+            FAILED_EXPERIMENTS=$((FAILED_EXPERIMENTS + 1))
+            failed=true
+            continue
+        fi
+
+        if [ "$TRT_BENCHMARK" != "0" ]; then
+            local policy_trt_args=(
+                "$PYTHON_BIN" "$SCRIPT_DIR/CaS-DETR/tools/benchmark/benchmark_experiment_trt.py"
+                --framework casdeim
+                --config "$config_path"
+                --checkpoint "$checkpoint"
+                --output-dir "$policy_dir"
+                --model "${source_name}__${policy_name}"
+                --run-id "$policy_run_id"
+                --dataset-protocol dairv2x_vehicle5
+                --seed "$EXPERIMENT_SEED"
+                --images /root/autodl-fs/datasets/DAIR-V2X-Vehicle5/image
+                --builder "$TRT_BUILDER"
+                --trtexec "$TRTEXEC"
+                --warmup "$TRT_WARMUP"
+                --iterations "$TRT_ITERATIONS"
+            )
+            if [ -n "$policy_ratio" ]; then
+                policy_trt_args+=(
+                    --caip-static-keep-eval
+                    --caip-eval-keep-ratio "$policy_ratio"
+                )
+            fi
+            if ! "${policy_trt_args[@]}"; then
+                log_error "✗ token policy TensorRT/reports 链路失败: $policy_name"
+                FAILED_EXPERIMENTS=$((FAILED_EXPERIMENTS + 1))
+                failed=true
+                continue
+            fi
+        fi
+        log_success "✓ token policy test + TensorRT 完成: $policy_name"
+        SUCCESSFUL_EXPERIMENTS=$((SUCCESSFUL_EXPERIMENTS + 1))
+    done
+    [ "$failed" = false ]
+}
+
 # 生成最终报告
 generate_report() {
     # 仅输出到终端，不生成文件
@@ -1725,20 +1894,22 @@ generate_report() {
     echo -e "${GREEN}成功: $SUCCESSFUL_EXPERIMENTS${NC} | ${RED}失败: $FAILED_EXPERIMENTS${NC} | ${YELLOW}跳过: $SKIPPED_EXPERIMENTS${NC}"
     echo ""
     echo -e "${BLUE}提示: 实验结果（包括mAP等指标）已保存在各训练脚本生成的日志目录中${NC}"
-    echo -e "${BLUE}      - CaS-DETR 消融日志: CaS-DETR/outputs/ablation/${NC}"
-    echo -e "${BLUE}      - DQM-DETR 消融日志: DQM-DETR/outputs/ablation/${NC}"
-    echo -e "${BLUE}      - DQM-DETR 主实验日志: DQM-DETR/outputs/main/${NC}"
+    echo -e "${BLUE}      - CaS-DETR 日志: CaS-DETR/outputs/${EXPERIMENT_DATASET_PROTOCOL:-dairv2x_vehicle5}/<group>/${NC}"
+    echo -e "${BLUE}      - DQM-DETR 日志: DQM-DETR/outputs/${EXPERIMENT_DATASET_PROTOCOL:-dairv2x_vehicle5}/<group>/${NC}"
     echo -e "${BLUE}      - YOLO统一日志: yolo/logs/${NC}"
-    echo -e "${BLUE}      - TensorRT 统一总表: reports/benchmark.csv${NC}"
-    echo -e "${BLUE}      - 精度+速度总表: reports/eval_metrics.csv${NC}"
+    echo -e "${BLUE}      - TensorRT 统一总表: reports/<protocol>/benchmark.csv${NC}"
+    echo -e "${BLUE}      - 精度+速度总表: reports/<protocol>/eval_metrics.csv${NC}"
     echo -e "${BLUE}      - DEIM日志: DEIM/outputs/${NC}"
     echo -e "${BLUE}      - D-FINE日志: D-FINE/output/${NC}"
-    echo -e "${BLUE}      - Deformable-DETR日志: deformable-detr/work_dirs/${NC}"
-    echo -e "${BLUE}      - RT-DETR v2（train_adapter + --cas-eval）: RT-DETR/rtdetrv2_pytorch/outputs/batch_*/${NC}"
+    echo -e "${BLUE}      - RT-DETR v2（train_adapter + --cas-eval）: RT-DETR/rtdetrv2_pytorch/outputs/<protocol>/batch_*/${NC}"
+    echo -e "${BLUE}      - YOLO 日志按完整协议名保存在 yolo/logs/<protocol>/${NC}"
 }
 
 calculate_total_planned_runs() {
     TOTAL_PLANNED_RUNS=${#CONFIGS_TO_RUN[@]}
+    if [ "$CAS_TOKEN_POLICY_TEST" = true ]; then
+        TOTAL_PLANNED_RUNS=$((TOTAL_PLANNED_RUNS + 4))
+    fi
 }
 
 # 主函数
@@ -1754,6 +1925,19 @@ main() {
     
     # 解析参数
     parse_arguments "$@"
+    if [ "$CAS_TOKEN_POLICY_TEST" = true ] && [ "$TEST_MODE" = true ]; then
+        log_error "--cas-token-policy-test 不能与 --test（2 epoch smoke training）同时使用"
+        exit 2
+    fi
+    if [ "$SCOPE_UADETRAC" = true ] && [ "$SCOPE_DAIRV2X" != true ]; then
+        export EXPERIMENT_DATASET_PROTOCOL=uadetrac_vehicle4
+        [ "$UADETRAC_VEHICLE1_MODE" = true ] \
+            && export EXPERIMENT_DATASET_PROTOCOL=uadetrac_vehicle1
+    elif [ "$DAIRV2X_VEHICLE5_MODE" = true ]; then
+        export EXPERIMENT_DATASET_PROTOCOL=dairv2x_vehicle5
+    elif [ "$SCOPE_DAIRV2X" = true ]; then
+        export EXPERIMENT_DATASET_PROTOCOL=dairv2x_vehicle8
+    fi
     calculate_total_planned_runs
     
     # 显示将要运行的实验
@@ -1761,9 +1945,17 @@ main() {
     local i=1
     for config in "${CONFIGS_TO_RUN[@]}"; do
         echo -e "  ${CYAN}[$i]${NC} $config"
-        ((i++))
+        i=$((i + 1))
     done
+    if [ "$CAS_TOKEN_POLICY_TEST" = true ]; then
+        echo -e "  ${CYAN}[eval]${NC} token policy test: dynamic + fixed keep .3/.7/1.0（同一指定 checkpoint）"
+    fi
     echo ""
+
+    if [ "$DRY_RUN" = true ]; then
+        log_info "dry-run 完成：未准备数据、未启动训练"
+        return 0
+    fi
     
     # 如果是测试模式，显示额外提示
     if [ "$TEST_MODE" = true ]; then
@@ -1785,6 +1977,13 @@ main() {
     else
         log_info "已启用 --yes，跳过确认，直接开始批量实验"
     fi
+
+    if [ "$SCOPE_DAIRV2X" = true ] && [ "$DAIRV2X_VEHICLE5_MODE" = true ]; then
+        prepare_vehicle5_dataset
+    fi
+    if [ "$SCOPE_UADETRAC" = true ] && [ "$UADETRAC_VEHICLE1_MODE" = true ]; then
+        prepare_uadetrac_vehicle1_dataset
+    fi
     
     # 禁用CSV结果文件
     # echo "实验名称,状态,耗时,完成时间" > "$BATCH_LOG_DIR/results.csv"
@@ -1795,6 +1994,7 @@ main() {
     for config in "${CONFIGS_TO_RUN[@]}"; do
         run_single_experiment "$config" || true
     done
+    run_cas_token_policy_test || true
     
     # 计算总耗时
     local global_end_time=$(date +%s)

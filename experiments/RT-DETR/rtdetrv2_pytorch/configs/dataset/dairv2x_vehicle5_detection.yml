@@ -1,0 +1,14 @@
+__include__: ['./dairv2x_detection.yml']
+
+# Car + Truck + Van + Bus -> vehicle; all original boxes are retained.
+num_classes: 5
+
+train_dataloader:
+  dataset:
+    data_root: /root/autodl-fs/datasets/DAIR-V2X-Vehicle5
+    img_folder: /root/autodl-fs/datasets/DAIR-V2X-Vehicle5
+
+val_dataloader:
+  dataset:
+    data_root: /root/autodl-fs/datasets/DAIR-V2X-Vehicle5
+    img_folder: /root/autodl-fs/datasets/DAIR-V2X-Vehicle5

@@ -209,8 +209,10 @@ def collect_images(image_dir: Path):
     return sorted(image_files)
 
 
-def find_latest_checkpoint():
-    checkpoints = list(Path("logs").glob("*/weights/best.pt"))
+def find_latest_checkpoint(dataset_key: str):
+    checkpoints = list(
+        (Path("logs") / dataset_key).glob("*/weights/best.pt")
+    )
     if not checkpoints:
         return None
     return str(max(checkpoints, key=lambda path: path.stat().st_mtime))
@@ -221,7 +223,7 @@ def main():
     parser.add_argument("--version", type=str, required=True, help="YOLO版本: v5/v8/v12")
     parser.add_argument("--dataset", type=str, default="dairv2x", help="数据集键名或别名（在 configs/datasets.yaml 中定义）")
     parser.add_argument("--dataset_registry", type=str, default="configs/datasets.yaml", help="数据集注册表路径")
-    parser.add_argument("--checkpoint", type=str, default="logs/*/weights/best.pt", help="模型检查点")
+    parser.add_argument("--checkpoint", type=str, default="auto", help="模型检查点；auto 按协议选择最新权重")
     parser.add_argument("--image_dir", type=str, default=None, help="输入图像目录（默认取数据集配置）")
     parser.add_argument("--output_dir", type=str, default=None, help="输出目录（默认取数据集配置）")
     parser.add_argument("--conf", type=float, default=0.5, help="置信度阈值")
@@ -243,8 +245,8 @@ def main():
     colors = build_colors(len(class_names))
 
     checkpoint = args.checkpoint
-    if "*" in checkpoint:
-        latest = find_latest_checkpoint()
+    if checkpoint == "auto":
+        latest = find_latest_checkpoint(dataset_key)
         if not latest:
             raise FileNotFoundError("未找到检查点，请手动指定 --checkpoint")
         checkpoint = latest

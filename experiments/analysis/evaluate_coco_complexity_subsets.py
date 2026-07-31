@@ -36,7 +36,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # ``.../<repo>/experiments/analysis`` -> 仓库根 ``.../<repo>``
 REPO_ROOT = SCRIPT_DIR.parents[1]
 CAS_ROOT = REPO_ROOT / "experiments" / "CaS-DETR"
-DEFAULT_GT_PATH = Path("/root/autodl-fs/datasets/DAIR-V2X/annotations/instances_test.json")
+DEFAULT_GT_PATH = Path(
+    "/root/autodl-fs/datasets/DAIR-V2X-Vehicle5/annotations/instances_test.json"
+)
 
 
 def resolve_repo_path(path: Path) -> Path:
@@ -95,6 +97,14 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="覆盖 val_dataloader.dataset.img_folder，默认与 GT 同级的数据集根，如 .../DAIR-V2X。",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("experiments/reports") / os.environ.get(
+            "EXPERIMENT_DATASET_PROTOCOL", "dairv2x_vehicle5"
+        ) / "scene_complexity",
+        help="结果 CSV/JSON 输出目录；默认隔离到 DAIR Vehicle5 报告目录。",
     )
     parser.add_argument(
         "--device",
@@ -989,7 +999,9 @@ def run_online(args: argparse.Namespace) -> int:
     print("\n# AP50 Results")
     print(markdown_ap50_table(ap50_rows))
 
-    csv_path, json_path = save_scene_complexity_results(result_records, Path.cwd())
+    csv_path, json_path = save_scene_complexity_results(
+        result_records, resolve_repo_path(args.output_dir)
+    )
     print("\n# Saved Files")
     print(f"- CSV: `{csv_path}`")
     print(f"- JSON: `{json_path}`")

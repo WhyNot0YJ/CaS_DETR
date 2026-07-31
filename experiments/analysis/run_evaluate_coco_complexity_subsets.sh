@@ -8,7 +8,7 @@ set -euo pipefail
 #   bash experiments/analysis/run_evaluate_coco_complexity_subsets.sh \
 #     --plot-out experiments/analysis/scene_complexity_bars.png
 #
-# --plot-out 必须带保存路径，否则不会出图；本脚本会把「额外参数」原样传给 Python。
+# 结果默认写入 reports/dairv2x_vehicle5/scene_complexity；额外参数会原样传给 Python。
 #
 # Override any variable by exporting it before running, e.g.
 #   RESUME_DYNAMIC=/path/to.pth bash experiments/analysis/run_evaluate_coco_complexity_subsets.sh
@@ -25,8 +25,9 @@ cd "${ROOT_DIR}"
 DEVICE="${DEVICE:-cuda:0}"
 PYTHON="${PYTHON:-python3}"
 
-GT_JSON="${GT_JSON:-/root/autodl-fs/datasets/DAIR-V2X/annotations/instances_test.json}"
-TEST_IMG_FOLDER="${TEST_IMG_FOLDER:-/root/autodl-fs/datasets/DAIR-V2X}"
+GT_JSON="${GT_JSON:-/root/autodl-fs/datasets/DAIR-V2X-Vehicle5/annotations/instances_test.json}"
+TEST_IMG_FOLDER="${TEST_IMG_FOLDER:-/root/autodl-fs/datasets/DAIR-V2X-Vehicle5}"
+OUTPUT_DIR="${OUTPUT_DIR:-experiments/reports/${EXPERIMENT_DATASET_PROTOCOL:-dairv2x_vehicle5}/scene_complexity}"
 
 ENCODER_EPOCH="${ENCODER_EPOCH:--1}"
 
@@ -44,17 +45,17 @@ FIXED_KEEP_10="${FIXED_KEEP_10:-1.0}"
 
 # --- configs and checkpoints, defaults aligned with run_visualize_dual_aperture_dual_ckpt.sh for dynamic ---
 CONFIG_FIXED_03="${CONFIG_FIXED_03:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x.yml}"
-RESUME_FIXED_03="${RESUME_FIXED_03:-experiments/CaS-DETR/outputs/ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x/best_stg2.pth}"
+RESUME_FIXED_03="${RESUME_FIXED_03:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 CONFIG_FIXED_07="${CONFIG_FIXED_07:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x.yml}"
-RESUME_FIXED_07="${RESUME_FIXED_07:-experiments/CaS-DETR/outputs/ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x/best_stg2.pth}"
+RESUME_FIXED_07="${RESUME_FIXED_07:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # Fixed 1.0: repository baseline with full keep ratio, no CAIP or CASS
 CONFIG_FIXED_10="${CONFIG_FIXED_10:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_only_hgnetv2_s_dairv2x.yml}"
-RESUME_FIXED_10="${RESUME_FIXED_10:-experiments/CaS-DETR/outputs/ablation/cas_deim_moe4_only_hgnetv2_s_dairv2x/best_stg2.pth}"
+RESUME_FIXED_10="${RESUME_FIXED_10:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_only_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 CONFIG_DYNAMIC="${CONFIG_DYNAMIC:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
-RESUME_DYNAMIC="${RESUME_DYNAMIC:-experiments/CaS-DETR/outputs/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
+RESUME_DYNAMIC="${RESUME_DYNAMIC:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 if [[ ! -f "${GT_JSON}" ]]; then
   echo "Missing GT: ${GT_JSON}"
@@ -77,6 +78,7 @@ CMD=(
   "${PYTHON}" experiments/analysis/evaluate_coco_complexity_subsets.py
   --gt "${GT_JSON}"
   --test-img-folder "${TEST_IMG_FOLDER}"
+  --output-dir "${OUTPUT_DIR}"
   --device "${DEVICE}"
   --encoder-epoch "${ENCODER_EPOCH}"
   --online-fixed-03-config "${CONFIG_FIXED_03}"

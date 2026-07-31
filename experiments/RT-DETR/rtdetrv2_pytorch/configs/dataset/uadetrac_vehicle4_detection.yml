@@ -1,0 +1,11 @@
+__include__: ['./uadetrac_detection.yml']
+
+num_classes: 4
+
+train_dataloader:
+  dataset:
+    data_root: /root/autodl-fs/datasets/UA-DETRAC_COCO
+
+val_dataloader:
+  dataset:
+    data_root: /root/autodl-fs/datasets/UA-DETRAC_COCO

@@ -13,6 +13,7 @@ import torch.nn as nn
 FRAMEWORK_DIRS = {
     "casdeim": "CaS-DETR",
     "deim": "DEIM",
+    "dqmdeim": "DQM-DETR",
     "dfine": "D-FINE",
     "rtdetr": "RT-DETR/rtdetrv2_pytorch",
 }
@@ -25,28 +26,66 @@ def parse_args():
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--caip-static-keep-eval", action="store_true")
+    parser.add_argument("--caip-eval-keep-ratio", type=float)
+    parser.add_argument(
+        "--dataset-protocol",
+        choices=(
+            "dairv2x_vehicle5",
+            "dairv2x_vehicle8",
+            "uadetrac_vehicle1",
+            "uadetrac_vehicle4",
+        ),
+    )
     return parser.parse_args()
 
 
-def build(framework, config_path, checkpoint_path):
+def build(
+    framework,
+    config_path,
+    checkpoint_path,
+    dataset_protocol=None,
+    caip_static_keep_eval=False,
+    caip_eval_keep_ratio=None,
+):
     experiments_dir = Path(__file__).resolve().parents[3]
     framework_dir = experiments_dir / FRAMEWORK_DIRS[framework]
+    sys.path.insert(0, str(experiments_dir))
     sys.path.insert(0, str(framework_dir))
     os.chdir(framework_dir)
+    from common.dataset_protocol import apply_detr_protocol_overrides
     if framework in ("dfine", "rtdetr"):
         from src.core import YAMLConfig
     else:
         from engine.core import YAMLConfig
 
-    cfg = YAMLConfig(str(config_path))
+    overrides = {}
+    apply_detr_protocol_overrides(
+        overrides,
+        config_path,
+        dataset_protocol,
+        rtdetr_layout=framework == "rtdetr",
+    )
+    cfg = YAMLConfig(str(config_path), **overrides)
     if "HGNetv2" in cfg.yaml_cfg:
         cfg.yaml_cfg["HGNetv2"]["pretrained"] = False
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state = checkpoint.get("ema", {}).get("module") or checkpoint["model"]
-    cfg.model.load_state_dict(state, strict=True)
-    if hasattr(getattr(cfg.model, "encoder", None), "set_epoch"):
-        cfg.model.encoder.set_epoch(int(checkpoint.get("last_epoch", 0)))
-    return cfg.model.deploy(), cfg.postprocessor.deploy()
+    model = cfg.model
+    model.load_state_dict(state, strict=True)
+    encoder = getattr(model, "encoder", None)
+    if hasattr(encoder, "set_epoch"):
+        encoder.set_epoch(int(checkpoint.get("last_epoch", 0)))
+    if caip_static_keep_eval:
+        if encoder is None or not hasattr(encoder, "caip_static_keep_eval"):
+            raise ValueError("model does not support --caip-static-keep-eval")
+        encoder.caip_static_keep_eval = True
+    if caip_eval_keep_ratio is not None:
+        pruner = getattr(encoder, "shared_token_pruner", None)
+        if pruner is None or not hasattr(pruner, "keep_ratio"):
+            raise ValueError("model does not support --caip-eval-keep-ratio")
+        pruner.keep_ratio = float(caip_eval_keep_ratio)
+    return model.deploy(), cfg.postprocessor.deploy()
 
 
 class DeployModel(nn.Module):
@@ -61,10 +100,22 @@ class DeployModel(nn.Module):
 
 def main():
     args = parse_args()
+    if args.caip_eval_keep_ratio is not None:
+        if not args.caip_static_keep_eval:
+            raise ValueError("--caip-eval-keep-ratio requires --caip-static-keep-eval")
+        if not 0.0 < args.caip_eval_keep_ratio <= 1.0:
+            raise ValueError("--caip-eval-keep-ratio must be within (0, 1]")
     config = args.config.resolve()
     checkpoint = args.checkpoint.resolve()
     output = args.output.resolve()
-    model, postprocessor = build(args.framework, config, checkpoint)
+    model, postprocessor = build(
+        args.framework,
+        config,
+        checkpoint,
+        args.dataset_protocol,
+        args.caip_static_keep_eval,
+        args.caip_eval_keep_ratio,
+    )
     torch.manual_seed(123)
     wrapper = DeployModel(model, postprocessor).eval()
     inputs = (

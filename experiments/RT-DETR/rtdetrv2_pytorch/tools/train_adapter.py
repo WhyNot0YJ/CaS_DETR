@@ -2,7 +2,7 @@
 """Adapter launcher for RT-DETR training without changing original configs.
 
 ``-t`` / ``tuning`` 加载整网权重时，``load_tuning_state`` 只加载 **形状一致** 的参数。
-若 checkpoint 为 COCO（num_classes=80）而当前任务为 DAIR/UA（8/4 类），
+若 checkpoint 为 COCO（num_classes=80）而当前任务为 DAIR/Vehicle5/UA（8/5/4 类），
 decoder 侧分类头（``pred_logits``、``enc_score_head``、``denoising_class_embed`` 等）
 最后一维与 checkpoint 不一致，会进入日志里的 **unmatched** 而不会加载，相当于随机初始化；
 骨干等同形状层仍会继承预训练。
@@ -29,11 +29,16 @@ if _EXP_ROOT not in sys.path:
 from src.misc import dist_utils
 from src.core import YAMLConfig, yaml_utils
 from src.solver import TASKS
+from common.dataset_protocol import apply_detr_protocol_overrides, protocol_output_path
 
 
 DATASET_CONFIGS = {
     "uadetrac": "configs/dataset/uadetrac_detection.yml",
+    "uadetrac_vehicle1": "configs/dataset/uadetrac_vehicle1_detection.yml",
+    "uadetrac_vehicle4": "configs/dataset/uadetrac_vehicle4_detection.yml",
     "dairv2x": "configs/dataset/dairv2x_detection.yml",
+    "dairv2x_vehicle5": "configs/dataset/dairv2x_vehicle5_detection.yml",
+    "dairv2x_vehicle8": "configs/dataset/dairv2x_vehicle8_detection.yml",
 }
 
 
@@ -60,7 +65,11 @@ def _build_override_dict(args) -> dict:
     update_dict = yaml_utils.parse_cli(args.update)
     if getattr(args, "tuning", None) is None and os.environ.get("RTDETR_TUNING_CKPT"):
         update_dict.setdefault("tuning", os.environ["RTDETR_TUNING_CKPT"].strip())
-    cli_updates = {k: v for k, v in args.__dict__.items() if k not in ['update', 'dataset', 'dataset_config'] and v is not None}
+    cli_updates = {
+        k: v for k, v in args.__dict__.items()
+        if k not in ['update', 'dataset', 'dataset_config', 'dataset_protocol']
+        and v is not None
+    }
     update_dict.update(cli_updates)
 
     if args.data_root:
@@ -68,7 +77,7 @@ def _build_override_dict(args) -> dict:
         va_ds = update_dict.setdefault("val_dataloader", {}).setdefault("dataset", {})
         tr_ds["data_root"] = args.data_root
         va_ds["data_root"] = args.data_root
-        if getattr(args, "dataset", None) == "dairv2x":
+        if getattr(args, "dataset", None) in {"dairv2x", "dairv2x_vehicle5"}:
             tr_ds["img_folder"] = args.data_root
             va_ds["img_folder"] = args.data_root
 
@@ -110,6 +119,16 @@ def main(args) -> None:
 
     try:
         update_dict = _build_override_dict(args)
+        apply_detr_protocol_overrides(
+            update_dict,
+            args.config,
+            args.dataset_protocol,
+            rtdetr_layout=True,
+        )
+        if args.output_dir and args.dataset_protocol:
+            update_dict["output_dir"] = protocol_output_path(
+                args.output_dir, args.dataset_protocol
+            )
         cfg = YAMLConfig(str(runtime_config), **update_dict)
         print('cfg: ', cfg.__dict__)
 
@@ -165,6 +184,11 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', type=str, choices=sorted(DATASET_CONFIGS.keys()), help='dataset preset')
     parser.add_argument('--dataset-config', type=str, help='custom dataset overlay yaml')
     parser.add_argument('--data-root', type=str, help='override dataset root for train/val')
+    protocol = parser.add_mutually_exclusive_group()
+    protocol.add_argument('--dairv2x-vehicle5', dest='dataset_protocol', action='store_const', const='dairv2x_vehicle5')
+    protocol.add_argument('--dairv2x-vehicle8', dest='dataset_protocol', action='store_const', const='dairv2x_vehicle8')
+    protocol.add_argument('--uadetrac-vehicle1', dest='dataset_protocol', action='store_const', const='uadetrac_vehicle1')
+    protocol.add_argument('--uadetrac-vehicle4', dest='dataset_protocol', action='store_const', const='uadetrac_vehicle4')
 
     parser.add_argument('-r', '--resume', type=str, help='resume from checkpoint')
     parser.add_argument(

@@ -9,15 +9,25 @@ from typing import Dict, Iterable, Mapping, Sequence
 
 
 EXPERIMENTS_DIR = Path(__file__).resolve().parent.parent
-REPORTS_DIR = Path(os.environ.get("EXPERIMENT_RESULTS_DIR", EXPERIMENTS_DIR / "reports")).expanduser()
+
+
+def reports_dir() -> Path:
+    override = os.environ.get("EXPERIMENT_RESULTS_DIR")
+    if override:
+        return Path(override).expanduser()
+    protocol = os.environ.get(
+        "EXPERIMENT_DATASET_PROTOCOL", "dairv2x_vehicle5"
+    ).lower()
+    return EXPERIMENTS_DIR / "reports" / protocol
 
 
 def result_csv(kind: str) -> Path:
     """Return the single shared CSV for one result category."""
     if kind not in {"results", "eval_metrics", "benchmark"}:
         raise ValueError(f"unsupported result category: {kind}")
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    return REPORTS_DIR / f"{kind}.csv"
+    directory = reports_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{kind}.csv"
 
 
 def append_csv_rows(path: Path, rows: Iterable[Mapping[str, object]]) -> None:

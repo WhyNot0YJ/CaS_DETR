@@ -13,17 +13,17 @@ cd "${ROOT_DIR}"
 
 # Model A: DAIR-V2X (rows 1-2)
 CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
-RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
+RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # Model B: UA-DETRAC (rows 3-4)
 CONFIG_B="${CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml}"
-RESUME_B="${RESUME_B:-experiments/CaS-DETR/outputs/ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac/best_stg2.pth}"
+RESUME_B="${RESUME_B:-experiments/CaS-DETR/outputs/uadetrac_vehicle1/ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac/best_stg2.pth}"
 
 # Baseline models for the baseline column, third panel after original and heatmap.
 BASELINE_CONFIG_A="${BASELINE_CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_dairv2x.yml}"
-BASELINE_RESUME_A="${BASELINE_RESUME_A:-experiments/CaS-DETR/outputs/ablation/cas_deim_all_off_hgnetv2_s_dairv2x/best_stg2.pth}"
+BASELINE_RESUME_A="${BASELINE_RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_all_off_hgnetv2_s_dairv2x/best_stg2.pth}"
 BASELINE_CONFIG_B="${BASELINE_CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_uadetrac.yml}"
-BASELINE_RESUME_B="${BASELINE_RESUME_B:-experiments/CaS-DETR/outputs/ablation/cas_deim_all_off_hgnetv2_s_uadetrac/best_stg2.pth}"
+BASELINE_RESUME_B="${BASELINE_RESUME_B:-experiments/CaS-DETR/outputs/uadetrac_vehicle1/ablation/cas_deim_all_off_hgnetv2_s_uadetrac/best_stg2.pth}"
 
 DEVICE="${DEVICE:-cuda}"
 EVAL_EPOCH_A="${EVAL_EPOCH_A:-5}"
@@ -40,14 +40,14 @@ COMPACT="${COMPACT:-0}"
 PDF_SLIM_FONTS="${PDF_SLIM_FONTS:-0}"
 # Default 1: red FN on baseline from CaS boxes; 0 disables.
 MARK_BASELINE_FAILURE_FROM_CAS="${MARK_BASELINE_FAILURE_FROM_CAS:-1}"
-OUTPUT_PATH="${OUTPUT_PATH:-experiments/analysis/figure5_qualitative_cas_detr.pdf}"
+OUTPUT_PATH="${OUTPUT_PATH:-experiments/analysis/figures/dairv2x_vehicle5_uadetrac_vehicle1/figure5_qualitative_cas_detr.pdf}"
 
 # Image row order (editable):
 # Row1/Row2 use model A; Row3/Row4 use model B.
-IMG_ROW_1="${IMG_ROW_1:-/root/autodl-fs/datasets/DAIR-V2X/image/004258.jpg}"
-IMG_ROW_2="${IMG_ROW_2:-/root/autodl-fs/datasets/DAIR-V2X/image/007135.jpg}"
-IMG_ROW_3="${IMG_ROW_3:-/root/autodl-fs/datasets/UA-DETRAC_COCO/test/2604.jpg}"
-IMG_ROW_4="${IMG_ROW_4:-/root/autodl-fs/datasets/UA-DETRAC_COCO/test/3963.jpg}"
+IMG_ROW_1="${IMG_ROW_1:-/root/autodl-fs/datasets/DAIR-V2X-Vehicle5/image/004258.jpg}"
+IMG_ROW_2="${IMG_ROW_2:-/root/autodl-fs/datasets/DAIR-V2X-Vehicle5/image/007135.jpg}"
+IMG_ROW_3="${IMG_ROW_3:-/root/autodl-fs/datasets/UA-DETRAC-Vehicle1/test/2604.jpg}"
+IMG_ROW_4="${IMG_ROW_4:-/root/autodl-fs/datasets/UA-DETRAC-Vehicle1/test/3963.jpg}"
 
 for f in "${CONFIG_A}" "${RESUME_A}" "${CONFIG_B}" "${RESUME_B}" "${BASELINE_CONFIG_A}" "${BASELINE_CONFIG_B}" "${IMG_ROW_1}" "${IMG_ROW_2}" "${IMG_ROW_3}" "${IMG_ROW_4}"; do
   if [[ ! -f "${f}" ]]; then

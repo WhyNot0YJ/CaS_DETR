@@ -1,0 +1,11 @@
+__include__: [
+  './dqm_deim_full_default_hgnetv2_s_dairv2x.yml',
+  '../dairv2x_vehicle5_detection.yml',
+]
+
+output_dir: ./outputs/main/dqm_deim_full_default_hgnetv2_s_dairv2x_vehicle5
+
+# DAWN uses a different taxonomy; do not mix its 7-class cross-domain eval
+# into the native Vehicle5 training run.
+cross_domain_eval:
+  enable: false

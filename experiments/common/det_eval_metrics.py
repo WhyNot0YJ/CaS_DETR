@@ -382,17 +382,26 @@ def dataset_display_name(config: Dict) -> str:
     dc = config.get("data", {})
     ds_cls = dc.get("dataset_class", "")
     root = str(dc.get("data_root", "")).lower()
+    if "vehicle5" in root:
+        return "DAIR-V2X-Vehicle5"
     if ds_cls == "DAIRV2XDetection" or "dair-v2x" in root or "dairv2x" in root:
-        return "DAIR-V2X"
+        return "DAIR-V2X-Vehicle8"
+    if "vehicle1" in root:
+        return "UA-DETRAC-Vehicle1"
     if ds_cls == "CocoFolderDetection" or "uadetrac" in root or "ua-detrac" in root:
-        return "UA-DETRAC"
+        return "UA-DETRAC-Vehicle4"
     return Path(dc.get("data_root", "unknown")).stem
 
 
 def dataset_dir_name(config: Dict) -> str:
     """用于日志子目录的短名（小写无连字符）。"""
     display = dataset_display_name(config)
-    return {"DAIR-V2X": "dairv2x", "UA-DETRAC": "uadetrac"}.get(display, display.lower())
+    return {
+        "DAIR-V2X-Vehicle8": "dairv2x_vehicle8",
+        "DAIR-V2X-Vehicle5": "dairv2x_vehicle5",
+        "UA-DETRAC-Vehicle1": "uadetrac_vehicle1",
+        "UA-DETRAC-Vehicle4": "uadetrac_vehicle4",
+    }.get(display, display.lower())
 
 
 def model_display_name(config: Dict, fallback_experiment_name: str = "") -> str:

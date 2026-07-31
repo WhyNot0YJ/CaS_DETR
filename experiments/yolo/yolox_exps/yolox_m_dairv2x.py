@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YOLOX-M on DAIR-V2X COCO (8 classes)."""
+"""YOLOX-M on the default DAIR-V2X Vehicle5 protocol."""
 
 import os
 
@@ -11,6 +11,6 @@ class Exp(CasYoloxExp):
         super().__init__()
         self.depth = 0.67
         self.width = 0.75
-        self.num_classes = 8
+        self.num_classes = 5
         self.image_layout = "flat_image_dir"
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
