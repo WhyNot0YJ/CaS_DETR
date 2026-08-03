@@ -130,6 +130,8 @@ def main(args) -> None:
                 args.output_dir, args.dataset_protocol
             )
         cfg = YAMLConfig(str(runtime_config), **update_dict)
+        if args.tuning and "PResNet" in cfg.yaml_cfg:
+            cfg.yaml_cfg["PResNet"]["pretrained"] = False
         print('cfg: ', cfg.__dict__)
 
         _persist_runtime_config(cfg)
