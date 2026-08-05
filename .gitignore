@@ -189,9 +189,15 @@ experiments/**/dataset/
 
 # Local failed/preflight experiment archives
 /artifacts/failed_training_preflight_*/
+# Generated evaluation artifacts
+/artifacts/**/*.json
+/artifacts/**/*.log
 /experiments/DQM-DETR/**/*.zip
 /experiments/DQM-DETR/**/*.html
 
 # Generated analysis figures and protocol-specific subset exports
 /experiments/analysis/figures/
 /experiments/reports/*/scene_complexity/
+
+# Generated evaluation logs and predictions
+/experiments/**/logs/**/*.json

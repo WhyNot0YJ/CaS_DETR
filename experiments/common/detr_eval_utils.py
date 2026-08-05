@@ -82,17 +82,17 @@ def log_detr_eval_summary(
     bench_line = format_bench_inline(bench_dict)
     logger.info(
         f"  best_model [{split_label}]  "
-        f"mAP50={m.get('mAP_0.5', 0):.4f}  "
+        f"mAP50={m.get('mAP_0.5', m.get('mAP_50', 0)):.4f}  "
         f"mAP75={m.get('mAP_0.75', 0):.4f}  "
-        f"mAP={m.get('mAP_0.5_0.95', 0):.4f}\n"
+        f"mAP={m.get('mAP_0.5_0.95', m.get('mAP_5095', 0)):.4f}\n"
         f"S/M/L@0.5: "
         f"{m.get('AP_small_50', 0):.4f}/"
         f"{m.get('AP_medium_50', 0):.4f}/"
         f"{m.get('AP_large_50', 0):.4f}  |  "
         f"S/M/L@0.5:0.95: "
-        f"{m.get('AP_small', 0):.4f}/"
-        f"{m.get('AP_medium', 0):.4f}/"
-        f"{m.get('AP_large', 0):.4f}"
+        f"{m.get('AP_small', m.get('AP_small_5095', 0)):.4f}/"
+        f"{m.get('AP_medium', m.get('AP_medium_5095', 0)):.4f}/"
+        f"{m.get('AP_large', m.get('AP_large_5095', 0)):.4f}"
         f"{bench_line}"
     )
 

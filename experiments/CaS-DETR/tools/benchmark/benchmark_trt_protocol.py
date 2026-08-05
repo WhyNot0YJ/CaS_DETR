@@ -31,6 +31,11 @@ def parse_args():
     parser.add_argument("--framework", default="")
     parser.add_argument("--dataset", default="")
     parser.add_argument("--seed", default="")
+    parser.add_argument("--checkpoint-sha256", default="")
+    parser.add_argument("--config-sha256", default="")
+    parser.add_argument("--training-taxonomy", default="")
+    parser.add_argument("--evaluation-taxonomy", default="")
+    parser.add_argument("--postprocess", default="")
     parser.add_argument("--images", type=Path, required=True)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--preprocess", choices=("resize", "letterbox"), default="resize")
@@ -191,6 +196,11 @@ def main():
         "framework": args.framework,
         "dataset": args.dataset,
         "seed": args.seed,
+        "checkpoint_sha256": args.checkpoint_sha256,
+        "config_sha256": args.config_sha256,
+        "training_taxonomy": args.training_taxonomy,
+        "evaluation_taxonomy": args.evaluation_taxonomy,
+        "postprocess": args.postprocess,
         "result_type": "benchmark",
         "model": args.model,
         "engine": str(args.engine.resolve()),

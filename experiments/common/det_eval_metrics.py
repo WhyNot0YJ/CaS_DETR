@@ -1,5 +1,5 @@
 """
-DETR / YOLO 共用的 KITTI 难度与 COCO 评估辅助。
+DETR / YOLO 共用的 COCO 评估辅助。
 
 - AP_small/medium/large @0.5：``coco_area_ap_at_iou50``；@0.5:0.95 可用 stats[3:6]。
 """
@@ -29,7 +29,6 @@ except ImportError:  # pragma: no cover
 # 供 YOLO/DETR 日志区分「未安装 pycocotools」与「无 GT」
 PYCOCOTOOLS_AVAILABLE: bool = COCO is not None
 
-# 与 yolo_validator_utils.MultiScaleMetricsCalculator 一致
 SMALL_AREA_THRESHOLD = 32 * 32
 MEDIUM_AREA_THRESHOLD = 96 * 96
 def coco_ap_at_iou50_all(coco_eval) -> float:

@@ -23,7 +23,12 @@ def reports_dir() -> Path:
 
 def result_csv(kind: str) -> Path:
     """Return the single shared CSV for one result category."""
-    if kind not in {"results", "eval_metrics", "benchmark"}:
+    if kind not in {
+        "results",
+        "eval_metrics",
+        "fine_grained_eval_metrics",
+        "benchmark",
+    }:
         raise ValueError(f"unsupported result category: {kind}")
     directory = reports_dir()
     directory.mkdir(parents=True, exist_ok=True)

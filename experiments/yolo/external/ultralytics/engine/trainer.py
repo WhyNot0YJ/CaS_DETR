@@ -26,7 +26,7 @@ from torch import nn, optim
 _EXPERIMENTS_DIR = Path(__file__).resolve().parents[4]
 if str(_EXPERIMENTS_DIR) not in sys.path:
     sys.path.insert(0, str(_EXPERIMENTS_DIR))
-from common.result_paths import append_csv_rows, result_csv
+from common.result_paths import append_csv_rows
 
 from ultralytics import __version__
 from ultralytics.cfg import get_cfg, get_save_dir
@@ -172,7 +172,7 @@ class BaseTrainer:
         self.loss = None
         self.tloss = None
         self.loss_names = ["Loss"]
-        self.csv = result_csv("results")
+        self.csv = self.save_dir / "results.csv"
         self.run_id = self.save_dir.name
         self.plot_idx = [0, 1, 2]
 

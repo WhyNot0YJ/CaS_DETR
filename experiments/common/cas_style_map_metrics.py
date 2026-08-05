@@ -1,6 +1,4 @@
-"""
-Provide shared COCO-style mAP and KITTI difficulty metrics for DETR-family trainers.
-"""
+"""COCO-style mAP metrics for DETR-family trainers."""
 
 from __future__ import annotations
 

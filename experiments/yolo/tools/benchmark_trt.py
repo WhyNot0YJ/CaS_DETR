@@ -19,13 +19,18 @@ from torch import nn
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", type=Path, required=True)
+    parser.add_argument("--config", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--images", type=Path, required=True)
     parser.add_argument("--run-id", default="")
     parser.add_argument("--model", help="Name recorded in the benchmark CSV")
     parser.add_argument("--dataset", default="")
     parser.add_argument("--seed", default="")
+    parser.add_argument("--training-taxonomy", default="")
+    parser.add_argument("--evaluation-taxonomy", default="")
+    parser.add_argument("--postprocess", default="")
     parser.add_argument("--yolox-exp", type=Path)
+    parser.add_argument("--num-classes", type=int)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--conf", type=float, default=0.25)
     parser.add_argument("--iou", type=float, default=0.7)
@@ -112,15 +117,18 @@ def export_yolox_onnx(weights, output, args):
 
     from yolox.exp import get_exp
     from yolox.models.network_blocks import SiLU
-    from yolox.utils import fuse_model, load_ckpt, replace_module
+    from yolox.utils import fuse_model, replace_module
 
     exp = get_exp(exp_file=str(args.yolox_exp.resolve()))
+    if args.num_classes is None:
+        raise ValueError("--num-classes is required for YOLOX export")
+    exp.num_classes = args.num_classes
     model = exp.get_model()
     try:
         checkpoint = torch.load(weights, map_location="cpu", weights_only=False)
     except TypeError:
         checkpoint = torch.load(weights, map_location="cpu")
-    model = load_ckpt(model, checkpoint.get("model", checkpoint))
+    model.load_state_dict(checkpoint.get("model", checkpoint), strict=True)
     model = replace_module(fuse_model(model).eval(), nn.SiLU, SiLU)
     model.head.decode_in_inference = True
     wrapper = YOLOXNMSModel(model, args.conf, args.iou, args.max_det).eval()
@@ -156,23 +164,47 @@ def main():
     trt_dir.mkdir(parents=True, exist_ok=True)
     model_name = args.model or args.weights.stem
     run_id = args.run_id or output_dir.name
-    onnx = trt_dir / f"{model_name}_nms.onnx"
-    engine = trt_dir / f"{model_name}_nms_fp16.engine"
-    build_log = trt_dir / f"{model_name}_nms_fp16.build.log"
     experiments_dir = Path(__file__).resolve().parents[2]
     if str(experiments_dir) not in sys.path:
         sys.path.insert(0, str(experiments_dir))
     from common.result_paths import result_csv
+    from common.hierarchical_eval import sha256_file
+    from common.trt_provenance import (
+        artifact_hash_suffix,
+        build_engine_provenance,
+        engine_is_reusable,
+        write_engine_provenance,
+    )
+
+    config_path = (args.config or (output_dir / "config.yaml")).resolve()
+    export_options = {
+        "imgsz": args.imgsz,
+        "batch": 1,
+        "conf": args.conf,
+        "iou": args.iou,
+        "max_det": args.max_det,
+        "native_nms": True,
+        "num_classes": args.num_classes,
+        "yolox_exp": str(args.yolox_exp.resolve()) if args.yolox_exp else "",
+        "yolox_exp_sha256": (
+            sha256_file(args.yolox_exp.resolve()) if args.yolox_exp else ""
+        ),
+    }
+    provenance = build_engine_provenance(
+        checkpoint=args.weights,
+        config=config_path,
+        framework="yolox" if args.yolox_exp else "yolo",
+        export_options=export_options,
+    )
+    artifact_stem = (
+        f"{model_name}_nms_fp16_{artifact_hash_suffix(provenance)}"
+    )
+    onnx = trt_dir / f"{artifact_stem}.onnx"
+    engine = trt_dir / f"{artifact_stem}.engine"
+    build_log = trt_dir / f"{artifact_stem}.build.log"
 
     benchmark_csv = result_csv("benchmark")
     eval_csv = result_csv("eval_metrics")
-
-    export_onnx(args.weights, onnx, args)
-    # ONNX export may leave the PyTorch model/context cached on CUDA. Release
-    # it before launching TensorRT's separate builder process.
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
 
     shared_dir = experiments_dir / "CaS-DETR" / "tools"
     use_trtexec = args.builder == "trtexec" or (
@@ -185,9 +217,7 @@ def main():
     ]
     if use_trtexec:
         build_command.extend(("--log", str(build_log), "--trtexec", args.trtexec))
-    commands = (
-        build_command,
-        [
+    benchmark_command = [
             sys.executable, str(shared_dir / "benchmark" / "benchmark_trt_protocol.py"),
             "--engine", str(engine), "--model", model_name, "--output-csv", str(benchmark_csv),
             "--eval-csv", str(eval_csv),
@@ -196,12 +226,25 @@ def main():
             "--images", str(args.images.resolve()), "--imgsz", str(args.imgsz),
             "--preprocess", "letterbox", "--warmup", str(args.warmup),
             "--iterations", str(args.iterations),
-        ],
-    )
-    for command in commands:
-        subprocess.run(command, check=True)
-        if command is build_command and not engine.is_file():
+            "--checkpoint-sha256", provenance["checkpoint_sha256"],
+            "--config-sha256", provenance["config_sha256"],
+            "--training-taxonomy", args.training_taxonomy,
+            "--evaluation-taxonomy", args.evaluation_taxonomy,
+            "--postprocess", args.postprocess,
+    ]
+    if engine_is_reusable(engine, provenance):
+        print(f"Reusing hash-matched engine: {engine}")
+    else:
+        export_onnx(args.weights, onnx, args)
+        # ONNX export may leave the PyTorch model/context cached on CUDA.
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        subprocess.run(build_command, check=True)
+        if not engine.is_file():
             raise RuntimeError(f"TensorRT builder completed without creating engine: {engine}")
+        write_engine_provenance(engine, provenance)
+    subprocess.run(benchmark_command, check=True)
 
     print(f"ONNX: {onnx}")
     print(f"Engine: {engine}")

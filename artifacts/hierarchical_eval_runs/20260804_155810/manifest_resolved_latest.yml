@@ -1,0 +1,267 @@
+version: 1
+expected_unique_runs: 58
+protocols:
+  dairv2x_vehicle8:
+    hierarchical_eval: dairv2x_vehicle8_to_vehicle5
+    dataset: DAIR-V2X-Vehicle8
+    trt_images: /root/autodl-fs/datasets/DAIR-V2X_YOLO/images/val
+  uadetrac_vehicle4:
+    hierarchical_eval: uadetrac_vehicle4_to_vehicle1
+    dataset: UA-DETRAC-Vehicle4
+    trt_images: /root/autodl-fs/datasets/UA-DETRAC_YOLO/images/val
+yolo_runs:
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_v12n_20260717_224615
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_v12s_20260720_214000
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_v12m_20260724_192608
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_yolov5n_20260720_105447
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_yolov5s_20260720_133246
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_yolov5m_20260805_070839
+  supersedes: yolo_yolov5m_20260717_204417
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_yolov8n_20260724_175421
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_yolov8s_20260725_011123
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_yolov8m_20260720_174036
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_yolox_s_20260718_200745
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_yolox_m_20260718_082509
+- protocol: dairv2x_vehicle8
+  log_dir: yolo_fasterrcnn_resnet50_fpn_20260721_195730
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_v12n_20260718_005333
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_v12s_20260721_023258
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_v12m_20260718_024608
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_yolov5n_20260720_121934
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_yolov5s_20260720_153909
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_yolov5m_20260721_165645
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_yolov8n_20260727_145529
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_yolov8s_20260717_204759
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_yolov8m_20260724_192254
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_yolox_s_20260719_014745
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_yolox_m_20260718_145718
+- protocol: uadetrac_vehicle4
+  log_dir: yolo_fasterrcnn_resnet50_fpn_20260722_083910
+cas_runs:
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_all_off_hgnetv2_s_dairv2x
+  config: cas_deim_all_off_hgnetv2_s_dairv2x.yml
+  groups:
+  - component
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_only_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_only_dim1024_hgnetv2_s_dairv2x.yml
+  groups:
+  - component
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_cass_only_caip_base03_a10_hgnetv2_s_dairv2x
+  config: cas_deim_cass_only_caip_base03_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - component
+  - dynamic_base_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/base05_a10/cas_deim_cass_only_caip_base05_a10_hgnetv2_s_dairv2x
+  config: cas_deim_cass_only_caip_base05_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - dynamic_base_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/base05_a10/cas_deim_moe_cass_caip_base05_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe6_cass_caip_base05_a10_legacy_hgnetv2_s_dairv2x.yml
+  groups:
+  - component
+  - dynamic_base_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - component
+  - dynamic_base_ratio
+  - expert_count
+- protocol: dairv2x_vehicle8
+  output: ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - dynamic_base_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe_cass_caip_base05_a0_fixed_hgnetv2_s_dairv2x
+  config: cas_deim_moe_cass_caip_base05_a0_fixed_hgnetv2_s_dairv2x.yml
+  groups:
+  - dynamic_base_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/fixed_ratio/cas_deim_cass_only_keep05_hgnetv2_s_dairv2x
+  config: cas_deim_cass_only_keep05_hgnetv2_s_dairv2x.yml
+  groups:
+  - fixed_keep_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/fixed_ratio/cas_deim_cass_only_keep07_hgnetv2_s_dairv2x
+  config: cas_deim_cass_only_keep07_hgnetv2_s_dairv2x.yml
+  groups:
+  - fixed_keep_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/fixed_ratio/cas_deim_moe_cass_keep05_hgnetv2_s_dairv2x
+  config: cas_deim_moe6_cass_keep05_legacy_hgnetv2_s_dairv2x.yml
+  groups:
+  - fixed_keep_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/fixed_ratio/cas_deim_moe_cass_keep07_hgnetv2_s_dairv2x
+  config: cas_deim_moe6_cass_keep07_legacy_hgnetv2_s_dairv2x.yml
+  groups:
+  - fixed_keep_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x.yml
+  groups:
+  - fixed_keep_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x.yml
+  groups:
+  - fixed_keep_ratio
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - moe_capacity
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - moe_capacity
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - moe_capacity
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - moe_capacity
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe4_cap1x_cass_caip_base05_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe4_cap1x_cass_caip_base05_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - moe_capacity
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe3_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe3_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - expert_count
+- protocol: dairv2x_vehicle8
+  output: ablation/cas_deim_moe6_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x
+  config: cas_deim_moe6_dim128_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - expert_count
+- protocol: uadetrac_vehicle4
+  output: ablation/cas_deim_all_off_hgnetv2_s_uadetrac
+  config: cas_deim_all_off_hgnetv2_s_uadetrac.yml
+  groups:
+  - component
+- protocol: uadetrac_vehicle4
+  output: ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_uadetrac
+  config: cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_uadetrac.yml
+  groups:
+  - component
+  - dynamic_base_ratio
+- protocol: uadetrac_vehicle4
+  output: ablation/base05_a10/cas_deim_cass_only_caip_base05_a10_hgnetv2_s_uadetrac
+  config: cas_deim_cass_only_caip_base05_a10_hgnetv2_s_uadetrac.yml
+  groups:
+  - component
+- protocol: uadetrac_vehicle4
+  output: ablation/base05_a10/cas_deim_moe3_cass_caip_base05_a10_hgnetv2_s_uadetrac
+  config: cas_deim_moe3_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml
+  groups:
+  - component
+  - expert_count
+- protocol: uadetrac_vehicle4
+  output: ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac
+  config: cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml
+  groups:
+  - component
+  - dynamic_base_ratio
+  - expert_count
+- protocol: uadetrac_vehicle4
+  output: ablation/fixed_ratio/cas_deim_moe3_cass_keep05_hgnetv2_s_uadetrac
+  config: cas_deim_moe3_cass_keep05_hgnetv2_s_uadetrac.yml
+  groups:
+  - fixed_keep_ratio
+- protocol: uadetrac_vehicle4
+  output: ablation/fixed_ratio/cas_deim_moe3_cass_keep07_hgnetv2_s_uadetrac
+  config: cas_deim_moe3_cass_keep07_hgnetv2_s_uadetrac.yml
+  groups:
+  - fixed_keep_ratio
+- protocol: uadetrac_vehicle4
+  output: ablation/fixed_ratio/cas_deim_moe_cass_keep07_hgnetv2_s_uadetrac
+  config: cas_deim_moe6_cass_keep07_legacy_hgnetv2_s_uadetrac.yml
+  groups:
+  - fixed_keep_ratio
+baseline_runs:
+- protocol: dairv2x_vehicle8
+  framework: deim
+  run_id: root_deim_dairv2x
+  checkpoint: DEIM_dairv2x.pth
+  config: experiments/DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x.yml
+  groups:
+  - root_checkpoint
+  - baseline
+- protocol: uadetrac_vehicle4
+  framework: deim
+  run_id: root_deim_uadetrac
+  checkpoint: DEIM_uadetrac.pth
+  config: experiments/DEIM/configs/deim_dfine/deim_hgnetv2_s_uadetrac.yml
+  groups:
+  - root_checkpoint
+  - baseline
+- protocol: dairv2x_vehicle8
+  framework: dfine
+  run_id: root_dfine_dairv2x
+  checkpoint: DFINE_dairv2x.pth
+  config: experiments/D-FINE/configs/dfine/dfine_hgnetv2_s_dairv2x.yml
+  groups:
+  - root_checkpoint
+  - baseline
+- protocol: uadetrac_vehicle4
+  framework: dfine
+  run_id: root_dfine_uadetrac
+  checkpoint: DFINE_uadetrac.pth
+  config: experiments/D-FINE/configs/dfine/dfine_hgnetv2_s_uadetrac.yml
+  groups:
+  - root_checkpoint
+  - baseline
+root_cas_runs:
+- protocol: dairv2x_vehicle8
+  framework: casdeim
+  run_id: root_cas_deim_moe4_cap2x_base03_dairv2x
+  checkpoint: cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x.pth
+  config: experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml
+  groups:
+  - root_checkpoint
+root_cas_aliases:
+- checkpoint: cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.pth
+  alias_of: ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x
+- checkpoint: cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.pth
+  alias_of: ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac
+- checkpoint: cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.pth
+  alias_of: ablation/cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2_s_dairv2x
+- checkpoint: cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2_s_dairv2x.pth
+  alias_of: ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x
+- checkpoint: cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x.pth
+  alias_of: ablation/cas_deim_moe4_cap1x_cass_caip_base05_a10_hgnetv2_s_dairv2x

@@ -190,7 +190,18 @@ class TokenLevelPruner(nn.Module):
         current_keep_ratio = dynamic_keep_ratio if dynamic_keep_ratio is not None else self.get_current_keep_ratio()
 
         if torch.onnx.is_in_onnx_export() and dynamic_keep_ratio is not None:
-            ratio = dynamic_keep_ratio.to(device=tokens.device, dtype=torch.float32).clamp(min=0.0, max=1.0)
+            if isinstance(dynamic_keep_ratio, torch.Tensor):
+                ratio = dynamic_keep_ratio.to(
+                    device=tokens.device, dtype=torch.float32
+                )
+            else:
+                ratio = torch.full(
+                    (batch_size,),
+                    float(dynamic_keep_ratio),
+                    device=tokens.device,
+                    dtype=torch.float32,
+                )
+            ratio = ratio.clamp(min=0.0, max=1.0)
             num_keep = torch.floor(ratio * float(num_tokens)).to(torch.int64)
             num_keep = torch.clamp(num_keep, min=self.min_tokens, max=num_tokens)
             sorted_indices = torch.argsort(token_importance_scores, dim=1, descending=True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YOLOX 训练与与 Ultralytics 一致的 KITTI/scale 评估。"""
+"""YOLOX 训练与与 Ultralytics 一致的 COCO/scale 评估。"""
 
 from __future__ import annotations
 
@@ -205,19 +205,19 @@ class YOLOXTrainer(BaseYOLOTrainer):
 
     def _optional_post_train_benchmark(self, model) -> Optional[dict]:
         """
-        不在此处加载 YOLOX + 跑 FPS benchmark：训练刚结束显存紧张，且会与 KITTI eval 重复加载。
-        GFLOPs/FPS 在 ``_evaluate_kitti_scale_after_training`` 里对同一 eval_predictor 计算一次。
+        不在此处加载 YOLOX + 跑 FPS benchmark：训练刚结束显存紧张，且会与 COCO eval 重复加载。
+        GFLOPs/FPS 在 ``_evaluate_coco_scale_after_training`` 里对同一 eval_predictor 计算一次。
         """
         return None
 
-    def _can_run_kitti_eval_without_ultralytics_model(self) -> bool:
+    def _can_run_coco_eval_without_ultralytics_model(self) -> bool:
         return self._resolve_yolox_eval_ckpt() is not None
 
-    def _get_kitti_eval_predictor(self, model):
+    def _get_coco_eval_predictor(self, model):
         ckpt = self._resolve_yolox_eval_ckpt()
         if ckpt is None:
             self.logger.warning(
-                "未找到 YOLOX 权重（best_ckpt / last_epoch_ckpt），跳过 KITTI/scale 与 eval_metrics"
+                "未找到 YOLOX 权重（best_ckpt / last_epoch_ckpt），跳过 COCO/scale 与 eval_metrics"
             )
             return None, max(len(self.class_names), 1)
 
@@ -230,10 +230,10 @@ class YOLOXTrainer(BaseYOLOTrainer):
         nc = len(self.class_names) if self.class_names else int(exp.num_classes)
         return pred, nc
 
-    def _predict_batch_kitti_eval(self, predictor, batch_paths, imgsz, device):
+    def _predict_batch_coco_eval(self, predictor, batch_paths, imgsz, device):
         if isinstance(predictor, YOLOXEvalPredictor):
             return predictor.predict_paths(list(batch_paths), conf=0.01)
-        return super()._predict_batch_kitti_eval(predictor, batch_paths, imgsz, device)
+        return super()._predict_batch_coco_eval(predictor, batch_paths, imgsz, device)
 
     def _benchmark_eval_predictor(self, eval_predictor) -> Optional[dict]:
         if isinstance(eval_predictor, YOLOXEvalPredictor):

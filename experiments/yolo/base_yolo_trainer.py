@@ -49,6 +49,13 @@ from common.model_benchmark import (
     merge_benchmark_dict_into_metrics,
 )
 from common.result_paths import result_csv
+from common.hierarchical_eval import (
+    collapse_ground_truth,
+    collapse_predictions,
+    compute_coco_metrics,
+    hierarchical_eval_spec,
+    hierarchical_metadata,
+)
 from common.det_eval_metrics import (
     PYCOCOTOOLS_AVAILABLE,
     coco_ap_at_iou50_all,
@@ -60,8 +67,6 @@ from common.det_eval_metrics import (
     run_coco_bbox_eval,
 )
 from common.det_eval_metrics import write_eval_csv
-
-from yolo_validator_utils import MetricsLogger
 
 # Ultralytics ``cfg/default.yaml``：未指定 batch 时为 16
 DEFAULT_TRAIN_BATCH = 16
@@ -187,10 +192,6 @@ class BaseYOLOTrainer(ABC):
             with open(config_save_path, 'w', encoding='utf-8') as f:
                 yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True)
             self.logger.info(f"✓ 配置已保存到: {config_save_path}")
-        
-        # 初始化指标记录器
-        self.metrics_logger = MetricsLogger(self.log_dir)
-    
     def _validate_config(self):
         """验证配置文件"""
         required_keys = {
@@ -436,7 +437,7 @@ class BaseYOLOTrainer(ABC):
             raise
     
     # ------------------------------------------------------------------
-    # Post-training KITTI / multi-scale evaluation
+    # Post-training COCO / multi-scale evaluation
     # ------------------------------------------------------------------
 
     def _labels_meta_split_dir(self, root: Path, split: str) -> Path:
@@ -452,7 +453,7 @@ class BaseYOLOTrainer(ABC):
             return primary
         if alt.is_dir() and any(alt.glob('*.json')):
             self.logger.info(
-                "KITTI/scale 使用 data.coco_data_root 下的 labels_meta/%s: %s",
+                "COCO/scale 使用 data.coco_data_root 下的 labels_meta/%s: %s",
                 split,
                 alt,
             )
@@ -483,10 +484,13 @@ class BaseYOLOTrainer(ABC):
 
     def _resolve_coco_ann_file(self, data_cfg: dict, root: Path, split: str) -> Optional[Path]:
         ann_rel = str(data_cfg.get(f'{split}_coco_ann', '')).strip()
-        if not ann_rel:
+        if ann_rel:
+            path = Path(ann_rel)
+            return path if path.is_absolute() else root / path
+        coco_root = str(self.data_config.get('coco_data_root', '')).strip()
+        if not coco_root:
             return None
-        path = Path(ann_rel)
-        return path if path.is_absolute() else root / path
+        return Path(coco_root).expanduser().resolve() / 'annotations' / f'instances_{split}.json'
 
     def _load_coco_meta_by_stem(self, coco_ann_file: Path) -> Dict[str, Dict[str, Any]]:
         raw_coco = json.loads(coco_ann_file.read_text(encoding='utf-8'))
@@ -517,12 +521,13 @@ class BaseYOLOTrainer(ABC):
                     }
                 )
             meta_by_stem[Path(str(image['file_name'])).stem] = {
+                'image_id': image_id,
                 'objects': objects,
                 'weather': image.get('weather', ''),
             }
         return meta_by_stem
 
-    def _resolve_kitti_eval_splits(
+    def _resolve_coco_eval_splits(
         self, data_cfg: dict, root: Path
     ) -> List[Tuple[str, List[Path], Optional[Path], Optional[Path]]]:
         """
@@ -555,9 +560,9 @@ class BaseYOLOTrainer(ABC):
 
         return out
 
-    def _get_kitti_eval_predictor(self, model):
+    def _get_coco_eval_predictor(self, model):
         """
-        Return (predictor, num_classes) for KITTI/scale eval.
+        Return (predictor, num_classes) for COCO/scale eval.
         Default: Ultralytics ``YOLO`` loaded from ``weights/best.pt``.
         """
         best_pt = self.log_dir / 'weights' / 'best.pt'
@@ -572,8 +577,8 @@ class BaseYOLOTrainer(ABC):
         )
         return eval_model, nc
 
-    def _predict_batch_kitti_eval(self, predictor, batch_paths, imgsz, device):
-        """Run batch inference for KITTI eval (Ultralytics API)."""
+    def _predict_batch_coco_eval(self, predictor, batch_paths, imgsz, device):
+        """Run batch inference for COCO eval (Ultralytics API)."""
         return predictor.predict(
             source=[str(p) for p in batch_paths],
             conf=0.01,
@@ -582,8 +587,16 @@ class BaseYOLOTrainer(ABC):
             verbose=False,
         )
 
+    def _strict_validate_coco_eval_predictor(self, predictor) -> None:
+        """Require an exact state-dict match for hierarchical evaluation."""
+        module = getattr(predictor, 'model', predictor)
+        if not hasattr(module, 'state_dict') or not hasattr(module, 'load_state_dict'):
+            raise TypeError('evaluation predictor has no loadable model state')
+        module.load_state_dict(module.state_dict(), strict=True)
+        self.logger.info('Checkpoint compatibility verified with strict=True')
+
     def _benchmark_eval_predictor(self, eval_predictor) -> Optional[dict]:
-        """GFLOPs/FPS on the same weights used for KITTI eval (e.g. ``best.pt``)."""
+        """GFLOPs/FPS on the same weights used for COCO eval (e.g. ``best.pt``)."""
         return self._run_model_benchmark(eval_predictor)
 
     def _optional_post_train_benchmark(self, model) -> Optional[dict]:
@@ -592,11 +605,11 @@ class BaseYOLOTrainer(ABC):
             return None
         return self._run_model_benchmark(model)
 
-    def _can_run_kitti_eval_without_ultralytics_model(self) -> bool:
-        """If True, run KITTI/scale eval even when ``model`` is None (e.g. YOLOX)."""
+    def _can_run_coco_eval_without_ultralytics_model(self) -> bool:
+        """If True, run COCO/scale eval even when ``model`` is None (e.g. YOLOX)."""
         return False
 
-    def _kitti_eval_batch_size(self) -> int:
+    def _coco_eval_batch_size(self) -> int:
         """Return the initial post-training evaluation batch size.
 
         Evaluation is independent from the training batch size.  The
@@ -658,9 +671,9 @@ class BaseYOLOTrainer(ABC):
             return 'UA-DETRAC'
         return stem
 
-    def _evaluate_kitti_scale_after_training(self, model, bench_dict=None) -> dict:
+    def _evaluate_coco_scale_after_training(self, model, bench_dict=None) -> dict:
         """
-        训练结束后的 KITTI / multi-scale mAP：
+        训练结束后的 COCO / multi-scale mAP：
 
         - **val**：写 ``eval_metrics.csv`` 一行；
         - **test**：当 ``data.eval_test_after_training`` 为真且存在 ``test`` 与 ``labels_meta/test`` 时再评一行。
@@ -672,7 +685,7 @@ class BaseYOLOTrainer(ABC):
         try:
             data_yaml_path = Path(self._resolve_data_yaml())
         except FileNotFoundError as exc:
-            self.logger.warning(f"无法定位 data.yaml，跳过 KITTI/scale 评估: {exc}")
+            self.logger.warning(f"无法定位 data.yaml，跳过 COCO/scale 评估: {exc}")
             return {}
 
         with data_yaml_path.open(encoding='utf-8') as fh:
@@ -698,12 +711,12 @@ class BaseYOLOTrainer(ABC):
                         root = cand
                         break
 
-        splits = self._resolve_kitti_eval_splits(data_cfg, root)
+        splits = self._resolve_coco_eval_splits(data_cfg, root)
         if not splits:
             cr = self.data_config.get('coco_data_root')
             cr_res = Path(str(cr)).expanduser().resolve() if cr else None
             self.logger.warning(
-                '未找到可用的 KITTI/scale 评估划分：在 YAML path 对应 root=%s 与 data.coco_data_root=%s '
+                '未找到可用的 COCO/scale 评估划分：在 YAML path 对应 root=%s 与 data.coco_data_root=%s '
                 '下均未找到含 JSON 的 labels_meta/val 或 labels_meta/test',
                 root,
                 cr_res,
@@ -711,12 +724,12 @@ class BaseYOLOTrainer(ABC):
             return {}
 
         # ── 2. Load best weights & benchmark（各 split 共用）──────────────
-        eval_predictor, nc = self._get_kitti_eval_predictor(model)
+        eval_predictor, nc = self._get_coco_eval_predictor(model)
         if eval_predictor is None:
             best_pt = (self.log_dir / "weights" / "best.pt").resolve()
             last_pt = (self.log_dir / "weights" / "last.pt").resolve()
             self.logger.warning(
-                "无可用评估权重/预测器，跳过 KITTI/scale 评估：未找到 %s "
+                "无可用评估权重/预测器，跳过 COCO/scale 评估：未找到 %s "
                 "（eval_best_model 未传入内存中的 model，必须依赖该文件）",
                 best_pt,
             )
@@ -728,10 +741,17 @@ class BaseYOLOTrainer(ABC):
                 )
             return {}
 
+        if getattr(self, 'hierarchical_eval', None):
+            self._strict_validate_coco_eval_predictor(eval_predictor)
+
         device = self.misc_config.get('device', 'cuda')
         imgsz = self.training_config.get('imgsz', 640)
 
-        if bench_dict is None and eval_predictor is not None:
+        if (
+            bench_dict is None
+            and eval_predictor is not None
+            and not getattr(self, 'skip_pytorch_benchmark', False)
+        ):
             bench_dict = self._benchmark_eval_predictor(eval_predictor)
 
         model_name = self.model_config.get('model_name', f'yolov{self.VERSION}n')
@@ -740,6 +760,14 @@ class BaseYOLOTrainer(ABC):
         dataset_name = self._canonical_dataset_name()
 
         class_names = self.class_names if self.class_names else [f'cls_{i}' for i in range(nc)]
+        hierarchical_eval = getattr(self, 'hierarchical_eval', None)
+        hierarchy_spec = (
+            hierarchical_eval_spec(hierarchical_eval) if hierarchical_eval else None
+        )
+        checkpoint_sha256 = getattr(self, 'hierarchical_checkpoint_sha256', '')
+        hierarchy_output_dir = self.log_dir / 'hierarchical_eval'
+        if hierarchical_eval:
+            hierarchy_output_dir.mkdir(parents=True, exist_ok=True)
 
         def _weather_metric_key(value: str) -> str:
             key = ''.join(ch.lower() if ch.isalnum() else '_' for ch in str(value))
@@ -779,7 +807,13 @@ class BaseYOLOTrainer(ABC):
         if True:
             for eval_split, eval_img_dirs, labels_meta_dir, coco_ann_file in splits:
                 # ── 3. Per-split: images + meta ───────────────────────────
-                if labels_meta_dir and labels_meta_dir.is_dir() and any(labels_meta_dir.glob('*.json')):
+                source_coco_gt: Optional[Dict[str, Any]] = None
+                if hierarchical_eval and coco_ann_file and coco_ann_file.is_file():
+                    source_coco_gt = json.loads(
+                        coco_ann_file.read_text(encoding='utf-8')
+                    )
+                    meta_by_stem = self._load_coco_meta_by_stem(coco_ann_file)
+                elif labels_meta_dir and labels_meta_dir.is_dir() and any(labels_meta_dir.glob('*.json')):
                     meta_by_stem = {p.stem: p for p in labels_meta_dir.glob('*.json')}
                 elif coco_ann_file and coco_ann_file.is_file():
                     meta_by_stem = self._load_coco_meta_by_stem(coco_ann_file)
@@ -817,14 +851,14 @@ class BaseYOLOTrainer(ABC):
                 weather_by_image_id: Dict[int, str] = {}
                 ann_id = 0
 
-                eval_batch_size = self._kitti_eval_batch_size()
+                eval_batch_size = self._coco_eval_batch_size()
                 batch_start = 0
                 while batch_start < len(eval_images):
                     batch_paths = eval_images[
                         batch_start: batch_start + eval_batch_size
                     ]
                     try:
-                        batch_results = self._predict_batch_kitti_eval(
+                        batch_results = self._predict_batch_coco_eval(
                             eval_predictor, batch_paths, imgsz, device
                         )
                     except RuntimeError as exc:
@@ -847,23 +881,30 @@ class BaseYOLOTrainer(ABC):
                     ):
                         img_idx = batch_start + i_in_batch
                         img_h, img_w = result.orig_shape
-                        img_sizes[img_idx] = (int(img_w), int(img_h))
-                        debug_image_ids.add(img_idx)
                         raw_meta = meta_by_stem[img_path.stem]
                         raw = (
                             json.loads(raw_meta.read_text(encoding='utf-8'))
                             if isinstance(raw_meta, Path)
                             else raw_meta
                         )
+                        weather = ''
                         if isinstance(raw, list):
                             entries = raw
                         elif isinstance(raw, dict) and 'objects' in raw:
                             entries = raw['objects']
                             weather = str(raw.get('weather', '')).strip()
-                            if weather:
-                                weather_by_image_id[img_idx] = weather
                         else:
                             entries = []
+
+                        eval_image_id = int(
+                            raw.get('image_id', img_idx)
+                            if isinstance(raw, dict)
+                            else img_idx
+                        )
+                        img_sizes[eval_image_id] = (int(img_w), int(img_h))
+                        debug_image_ids.add(eval_image_id)
+                        if weather:
+                            weather_by_image_id[eval_image_id] = weather
 
                         for entry in entries:
                             cls = int(entry['class_id'])
@@ -890,7 +931,7 @@ class BaseYOLOTrainer(ABC):
                             coco_annotations.append(
                                 {
                                     "id": ann_id,
-                                    "image_id": img_idx,
+                                    "image_id": eval_image_id,
                                     "category_id": cls + 1,
                                     "bbox": [float(px1), float(py1), float(w_px), float(h_px)],
                                     "area": float(w_px * h_px),
@@ -899,7 +940,7 @@ class BaseYOLOTrainer(ABC):
                             )
                             debug_gt_annotations.append(
                                 {
-                                    "image_id": img_idx,
+                                    "image_id": eval_image_id,
                                     "category_id": cls + 1,
                                     "bbox": [float(px1), float(py1), float(w_px), float(h_px)],
                                 }
@@ -920,7 +961,7 @@ class BaseYOLOTrainer(ABC):
                                     if w_px > 0 and h_px > 0:
                                         coco_predictions.append(
                                             {
-                                                "image_id": img_idx,
+                                                "image_id": eval_image_id,
                                                 "category_id": c + 1,
                                                 "bbox": [x1, y1, w_px, h_px],
                                                 "score": float(conf),
@@ -928,7 +969,7 @@ class BaseYOLOTrainer(ABC):
                                         )
                                         debug_pred_annotations.append(
                                             {
-                                                "image_id": img_idx,
+                                                "image_id": eval_image_id,
                                                 "category_id": c + 1,
                                                 "bbox": [x1, y1, w_px, h_px],
                                             }
@@ -958,23 +999,125 @@ class BaseYOLOTrainer(ABC):
                 # ── 5. AP：全类 mAP / S/M/L / 每类 AP（一次 COCOeval，全 GT iscrowd=0）
                 metrics: Dict[str, Any] = {}
 
-                categories_coco = [
+                fine_categories_coco = [
                     {'id': i + 1, 'name': class_names[i]} for i in range(nc)
                 ]
-                coco_gt = {
-                    'images': [
-                        {
-                            'id': i,
-                            'width': img_sizes[i][0],
-                            'height': img_sizes[i][1],
-                        }
-                        for i in range(len(eval_images))
-                    ],
-                    'categories': categories_coco,
-                    'annotations': coco_annotations,
-                }
+                if source_coco_gt is not None:
+                    selected_image_ids = set(img_sizes)
+                    fine_coco_gt = {
+                        **{
+                            key: value
+                            for key, value in source_coco_gt.items()
+                            if key not in {'images', 'annotations', 'categories'}
+                        },
+                        'images': [
+                            dict(image)
+                            for image in source_coco_gt.get('images', [])
+                            if int(image['id']) in selected_image_ids
+                        ],
+                        'categories': [
+                            dict(category)
+                            for category in source_coco_gt.get('categories', [])
+                        ],
+                        'annotations': [
+                            dict(annotation)
+                            for annotation in source_coco_gt.get('annotations', [])
+                            if int(annotation['image_id']) in selected_image_ids
+                        ],
+                    }
+                    if len(fine_coco_gt['images']) != len(eval_images):
+                        raise RuntimeError(
+                            f'{eval_split} original COCO image count mismatch: '
+                            f"{len(fine_coco_gt['images'])} != {len(eval_images)}"
+                        )
+                else:
+                    fine_coco_gt = {
+                        'images': [
+                            {
+                                'id': i,
+                                'width': img_sizes[i][0],
+                                'height': img_sizes[i][1],
+                            }
+                            for i in range(len(eval_images))
+                        ],
+                        'categories': fine_categories_coco,
+                        'annotations': coco_annotations,
+                    }
 
-                coco_eval = run_coco_bbox_eval(coco_gt, coco_predictions)
+                eval_class_names = class_names
+                eval_nc = nc
+                coco_gt = fine_coco_gt
+                eval_predictions = coco_predictions
+                csv_metadata = {
+                    'run_id': self.log_dir.name,
+                    'framework': getattr(self, 'REPORT_FRAMEWORK', 'yolo'),
+                    'experiment': self.experiment_name,
+                    'seed': self.config.get('seed', ''),
+                }
+                if hierarchical_eval:
+                    raw_prediction_path = (
+                        hierarchy_output_dir / f'predictions_{eval_split}.json'
+                    )
+                    collapsed_prediction_path = (
+                        hierarchy_output_dir
+                        / f'predictions_{eval_split}_collapsed.json'
+                    )
+                    raw_prediction_path.write_text(
+                        json.dumps(coco_predictions, ensure_ascii=False),
+                        encoding='utf-8',
+                    )
+                    fine_metrics = compute_coco_metrics(
+                        fine_coco_gt, coco_predictions
+                    )
+                    fine_metrics['eval_split'] = eval_split
+                    write_eval_csv(
+                        result_csv('fine_grained_eval_metrics'),
+                        model=model_name,
+                        dataset=dataset_name,
+                        eval_split=eval_split,
+                        metrics=fine_metrics,
+                        class_names=class_names,
+                        metadata={
+                            **csv_metadata,
+                            **hierarchical_metadata(
+                                hierarchical_eval, checkpoint_sha256
+                            ),
+                            'evaluation_taxonomy': hierarchy_spec['training_protocol'],
+                            'postprocess': 'native',
+                            'prediction_file': str(raw_prediction_path),
+                        },
+                    )
+                    coco_gt = collapse_ground_truth(
+                        fine_coco_gt, hierarchical_eval
+                    )
+                    eval_predictions = collapse_predictions(
+                        coco_predictions, hierarchical_eval
+                    )
+                    if len(eval_predictions) != len(coco_predictions):
+                        raise AssertionError(
+                            'label collapse changed the prediction count'
+                        )
+                    collapsed_prediction_path.write_text(
+                        json.dumps(eval_predictions, ensure_ascii=False),
+                        encoding='utf-8',
+                    )
+                    eval_class_names = [
+                        str(category['name'])
+                        for category in hierarchy_spec['categories']
+                    ]
+                    eval_nc = len(eval_class_names)
+                    csv_metadata.update(
+                        hierarchical_metadata(
+                            hierarchical_eval, checkpoint_sha256
+                        )
+                    )
+                    csv_metadata['prediction_file'] = str(
+                        collapsed_prediction_path
+                    )
+
+                categories_coco = coco_gt['categories']
+
+                coco_eval = run_coco_bbox_eval(coco_gt, eval_predictions)
                 per_cls_50: List[float] = []
                 per_cls_5095: List[float] = []
                 if coco_eval is None:
@@ -1001,10 +1144,10 @@ class BaseYOLOTrainer(ABC):
                     metrics['AP_small_5095'] = 0.0
                     metrics['AP_medium_5095'] = 0.0
                     metrics['AP_large_5095'] = 0.0
-                    per_cls_50 = [0.0] * nc
-                    per_cls_5095 = [0.0] * nc
-                    for i in range(nc):
-                        nm = class_names[i]
+                    per_cls_50 = [0.0] * eval_nc
+                    per_cls_5095 = [0.0] * eval_nc
+                    for i in range(eval_nc):
+                        nm = eval_class_names[i]
                         suffix = canonical_category_metric_name(nm)
                         metrics[f'AP50_{suffix}'] = 0.0
                         metrics[f'AP5095_{suffix}'] = 0.0
@@ -1032,15 +1175,15 @@ class BaseYOLOTrainer(ABC):
                         coco_eval, categories_coco
                     )
                     per_cls_50 = [
-                        per_cat_50.get(canonical_category_metric_name(class_names[i]), 0.0)
-                        for i in range(nc)
+                        per_cat_50.get(canonical_category_metric_name(eval_class_names[i]), 0.0)
+                        for i in range(eval_nc)
                     ]
                     per_cls_5095 = [
-                        per_cat_5095.get(canonical_category_metric_name(class_names[i]), 0.0)
-                        for i in range(nc)
+                        per_cat_5095.get(canonical_category_metric_name(eval_class_names[i]), 0.0)
+                        for i in range(eval_nc)
                     ]
-                    for i in range(nc):
-                        nm = class_names[i]
+                    for i in range(eval_nc):
+                        nm = eval_class_names[i]
                         suffix = canonical_category_metric_name(nm)
                         metrics[f'AP50_{suffix}'] = per_cat_50.get(suffix, 0.0)
                         metrics[f'AP5095_{suffix}'] = per_cat_5095.get(suffix, 0.0)
@@ -1056,10 +1199,12 @@ class BaseYOLOTrainer(ABC):
                     if not image_ids:
                         continue
                     sub_annotations = [
-                        ann for ann in coco_annotations if ann['image_id'] in image_ids
+                        ann
+                        for ann in coco_gt['annotations']
+                        if ann['image_id'] in image_ids
                     ]
                     sub_predictions = [
-                        pred for pred in coco_predictions if pred['image_id'] in image_ids
+                        pred for pred in eval_predictions if pred['image_id'] in image_ids
                     ]
                     sub_gt = {
                         'images': [
@@ -1102,10 +1247,10 @@ class BaseYOLOTrainer(ABC):
                     f"{metrics['AP_medium_5095']:.4f} / {metrics['AP_large_5095']:.4f}"
                 )
                 cls_50_str = ' | '.join(
-                    f'{class_names[i]}={per_cls_50[i]:.4f}' for i in range(nc)
+                    f'{eval_class_names[i]}={per_cls_50[i]:.4f}' for i in range(eval_nc)
                 )
                 cls_5095_str = ' | '.join(
-                    f'{class_names[i]}={per_cls_5095[i]:.4f}' for i in range(nc)
+                    f'{eval_class_names[i]}={per_cls_5095[i]:.4f}' for i in range(eval_nc)
                 )
                 self.logger.info(f"📋 [{eval_split}] Per-class AP@0.5:  {cls_50_str}")
                 self.logger.info(f"📋 [{eval_split}] Per-class AP@0.5:0.95:  {cls_5095_str}")
@@ -1127,19 +1272,14 @@ class BaseYOLOTrainer(ABC):
                     dataset=dataset_name,
                     eval_split=eval_split,
                     metrics=metrics,
-                    class_names=class_names,
+                    class_names=eval_class_names,
                     weather_buckets=weather_buckets,
                     benchmark={
                         k: v
                         for k, v in (bench_dict or {}).items()
                         if k in BENCHMARK_EVAL_METRIC_KEYS or k in END_TO_END_EVAL_METRIC_KEYS
                     },
-                    metadata={
-                        'run_id': self.log_dir.name,
-                        'framework': getattr(self, 'REPORT_FRAMEWORK', 'yolo'),
-                        'experiment': self.experiment_name,
-                        'seed': self.config.get('seed', ''),
-                    },
+                    metadata=csv_metadata,
                 )
                 last_metrics = metrics
 
@@ -1229,6 +1369,7 @@ class BaseYOLOTrainer(ABC):
             sys.executable,
             str(_yolo_dir / "tools" / "benchmark_trt.py"),
             "--weights", str(weights.resolve()),
+            "--config", str((self.log_dir / "config.yaml").resolve()),
             "--output-dir", str(self.log_dir.resolve()),
             "--images", str(self._benchmark_image_dir(data_yaml)),
             "--run-id", self.log_dir.name,
@@ -1272,18 +1413,18 @@ class BaseYOLOTrainer(ABC):
                     exc,
                 )
 
-            run_eval = model is not None or self._can_run_kitti_eval_without_ultralytics_model()
+            run_eval = model is not None or self._can_run_coco_eval_without_ultralytics_model()
             if not run_eval:
                 self.logger.warning(
-                    "跳过 KITTI/scale 与 eval_metrics：无 Ultralytics 模型且未在 log_dir 检测到可评估权重。"
+                    "跳过 COCO/scale 与 eval_metrics：无 Ultralytics 模型且未在 log_dir 检测到可评估权重。"
                     " log_dir=%s （请确认 best_ckpt.pth / weights/best.pt 是否在此目录下）",
                     self.log_dir.resolve(),
                 )
             else:
                 try:
-                    self._evaluate_kitti_scale_after_training(model, bench_dict=bench_dict)
+                    self._evaluate_coco_scale_after_training(model, bench_dict=bench_dict)
                 except Exception as exc:
-                    self.logger.warning(f"KITTI/scale 评估出错（训练结果不受影响）: {exc}")
+                    self.logger.warning(f"COCO/scale 评估出错（训练结果不受影响）: {exc}")
         finally:
             self.logger.info(f"✓ 所有输出已保存到: {self.log_dir.resolve()}")
             self.logger.info("=" * 80)
@@ -1291,7 +1432,7 @@ class BaseYOLOTrainer(ABC):
     def _parse_and_print_training_results(self):
         """解析results.csv并输出"""
         try:
-            results_csv = result_csv("results")
+            results_csv = self.log_dir / "results.csv"
             if not results_csv.exists():
                 self.logger.warning(f"未找到results.csv文件: {results_csv}")
                 return
@@ -1299,8 +1440,8 @@ class BaseYOLOTrainer(ABC):
             df = pd.read_csv(results_csv)
             if 'run_id' in df.columns:
                 df = df[df['run_id'].astype(str) == self.log_dir.name]
-            # Shared results.csv can contain mixed producers; keep plotting
-            # numeric-only rows so a string run_id never reaches matplotlib.
+            # Keep plotting numeric-only rows so malformed metadata never
+            # reaches matplotlib.
             if 'epoch' in df.columns:
                 df['epoch'] = pd.to_numeric(df['epoch'], errors='coerce')
                 df = df.dropna(subset=['epoch'])
@@ -1341,7 +1482,7 @@ class BaseYOLOTrainer(ABC):
     def _plot_training_curves(self):
         """生成训练曲线"""
         try:
-            results_csv = result_csv("results")
+            results_csv = self.log_dir / "results.csv"
             if not results_csv.exists():
                 return
             

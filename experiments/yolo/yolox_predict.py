@@ -1,4 +1,4 @@
-"""YOLOX inference for KITTI/scale eval (Ultralytics-compatible result objects)."""
+"""YOLOX inference for COCO/scale eval (Ultralytics-compatible result objects)."""
 
 from __future__ import annotations
 
@@ -122,12 +122,10 @@ def load_yolox_for_eval(
     device: str = "cuda",
     fuse_bn: bool = True,
 ) -> YOLOXEvalPredictor:
-    from yolox.utils import load_ckpt
-
     model = exp.get_model()
     ckpt = _torch_load_yolox_ckpt(ckpt_path, map_location="cpu")
     state = ckpt.get("model", ckpt)
-    model = load_ckpt(model, state)
+    model.load_state_dict(state, strict=True)
     if fuse_bn:
         model = fuse_model(model)
     fp16 = False

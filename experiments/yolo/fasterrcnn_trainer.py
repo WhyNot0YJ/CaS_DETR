@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Faster R-CNN (torchvision) 训练器 — 继承 BaseYOLOTrainer，
-复用 KITTI / multi-scale 评估管线与 eval_metrics.csv 输出。
+复用 COCO / multi-scale 评估管线与 eval_metrics.csv 输出。
 """
 
 import sys
@@ -32,7 +32,6 @@ if str(_yolo_dir) not in sys.path:
     sys.path.insert(0, str(_yolo_dir))
 
 from base_yolo_trainer import DEFAULT_TRAIN_BATCH, BaseYOLOTrainer
-from common.result_paths import append_csv_rows, result_csv
 from fasterrcnn_dataset import (
     DetectionCompose,
     LetterboxDetection,
@@ -224,11 +223,8 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
 
         best_val_loss = float("inf")
         results_rows: List[Dict[str, Any]] = []
-        csv_path = result_csv("results")
-        if (
-            resume_ckpt is not None
-            and csv_path.exists()
-        ):
+        csv_path = self.log_dir / "results.csv"
+        if resume_ckpt is not None and csv_path.exists():
             try:
                 import pandas as pd
                 prev = pd.read_csv(csv_path)
@@ -240,7 +236,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
                         min(float(r["val/total_loss"]) for r in results_rows)
                     )
                 self.logger.info(
-                    f"📈 已载入历史 results.csv 共 {len(results_rows)} 行, "
+                    f"📈 已载入本地 results.csv 共 {len(results_rows)} 行, "
                     f"历史 best val_loss≈{best_val_loss:.4f}"
                 )
             except Exception as exc:
@@ -374,7 +370,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         # ── write results.csv ──
         self._write_results_csv(results_rows)
 
-        # ── post-training (benchmark + KITTI/scale eval) ──
+        # ── post-training (benchmark + COCO/scale eval) ──
         best_pt = weights_dir / "best.pt"
         if best_pt.exists():
             ckpt = torch.load(best_pt, map_location=device)
@@ -404,23 +400,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             return
         df = pd.DataFrame(rows)
         df.to_csv(self.log_dir / "results.csv", index=False)
-        csv_path = result_csv("results")
-        append_csv_rows(
-            csv_path,
-            [
-                {
-                    "run_id": self.log_dir.name,
-                    "framework": "fasterrcnn",
-                    "experiment": self.experiment_name,
-                    "model": self.model_config.get("model_name", "fasterrcnn"),
-                    "dataset": Path(self.data_config.get("data_yaml", "unknown")).stem,
-                    "record_type": "train",
-                    **row,
-                }
-                for row in rows
-            ],
-        )
-        self.logger.info(f"✓ 训练曲线数据: {csv_path}")
+        self.logger.info(f"✓ 本地训练曲线数据: {self.log_dir / 'results.csv'}")
 
     def _log_fasterrcnn_resume(
         self,
@@ -505,9 +485,9 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         except Exception as exc:
             self.logger.warning(f"绘制训练曲线失败: {exc}")
 
-    # ── KITTI / scale eval overrides ──────────────────────────────────
+    # ── COCO / scale eval overrides ──────────────────────────────────
 
-    def _get_kitti_eval_predictor(self, model):
+    def _get_coco_eval_predictor(self, model):
         device = torch.device(self.misc_config.get("device", "cuda"))
         best_pt = self.log_dir / "weights" / "best.pt"
 
@@ -515,7 +495,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             eval_model = self._create_fresh_model()
             ckpt = torch.load(best_pt, map_location=device)
             state = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
-            eval_model.load_state_dict(state)
+            eval_model.load_state_dict(state, strict=True)
             eval_model.to(device).eval()
         elif model is not None:
             eval_model = model
@@ -526,7 +506,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         nc = max(len(self.class_names), 1)
         return eval_model, nc
 
-    def _predict_batch_kitti_eval(self, predictor, batch_paths, imgsz, device):
+    def _predict_batch_coco_eval(self, predictor, batch_paths, imgsz, device):
         device = torch.device(device) if isinstance(device, str) else device
         predictor.eval()
 
@@ -557,7 +537,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             results.append(_FasterRCNNResult(orig_shape, out))
         return results
 
-    def _can_run_kitti_eval_without_ultralytics_model(self) -> bool:
+    def _can_run_coco_eval_without_ultralytics_model(self) -> bool:
         return True
 
     # ── benchmark overrides ───────────────────────────────────────────
@@ -695,6 +675,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             sys.executable,
             str(_yolo_dir / "tools" / "benchmark_fasterrcnn_trt.py"),
             "--weights", str(weights.resolve()),
+            "--config", str((self.log_dir / "config.yaml").resolve()),
             "--output-dir", str(self.log_dir.resolve()),
             "--images", str(self._benchmark_image_dir(data_yaml)),
             "--num-classes", str(self.num_classes),

@@ -53,7 +53,7 @@ def main() -> None:
 
     model = YOLO(str(weights))
     bench = trainer._optional_post_train_benchmark(model)
-    trainer._evaluate_kitti_scale_after_training(model, bench_dict=bench)
+    trainer._evaluate_coco_scale_after_training(model, bench_dict=bench)
     if not args.no_tensorrt:
         trainer.run_tensorrt_benchmark()
     print(f"validated run_id={trainer.log_dir.name}")

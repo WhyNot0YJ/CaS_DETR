@@ -13,6 +13,12 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 from common.dataset_protocol import PROTOCOLS, set_report_protocol
 from common.result_paths import result_csv
+from common.trt_provenance import (
+    artifact_hash_suffix,
+    build_engine_provenance,
+    engine_is_reusable,
+    write_engine_provenance,
+)
 
 
 DATASET_NAMES = {
@@ -70,6 +76,9 @@ def parse_args():
     p.add_argument("--run-id", default="")
     p.add_argument("--dataset-protocol", choices=PROTOCOLS, required=True)
     p.add_argument("--seed", default="")
+    p.add_argument("--training-taxonomy", default="")
+    p.add_argument("--evaluation-taxonomy", default="")
+    p.add_argument("--postprocess", default="")
     p.add_argument("--images", type=Path, required=True)
     p.add_argument("--trtexec", default="trtexec")
     p.add_argument("--builder", choices=("auto", "trtexec", "python"), default="auto")
@@ -87,9 +96,21 @@ def main():
     deploy = experiments_dir / "CaS-DETR" / "tools" / "deployment"
     benchmark = experiments_dir / "CaS-DETR" / "tools" / "benchmark"
     trt_dir = args.output_dir / "tensorrt"
-    onnx = trt_dir / f"{args.model}.onnx"
-    engine = trt_dir / f"{args.model}.engine"
-    build_log = trt_dir / f"{args.model}.build.log"
+    provenance = build_engine_provenance(
+        checkpoint=args.checkpoint,
+        config=args.config,
+        framework=args.framework,
+        export_options={
+            "imgsz": 640,
+            "batch": 1,
+            "caip_static_keep_eval": bool(args.caip_static_keep_eval),
+            "caip_eval_keep_ratio": args.caip_eval_keep_ratio,
+        },
+    )
+    artifact_stem = f"{args.model}_{artifact_hash_suffix(provenance)}"
+    onnx = trt_dir / f"{artifact_stem}.onnx"
+    engine = trt_dir / f"{artifact_stem}.engine"
+    build_log = trt_dir / f"{artifact_stem}.build.log"
     benchmark_csv = result_csv("benchmark")
     eval_csv = result_csv("eval_metrics")
     run_id = args.run_id or args.output_dir.name
@@ -115,19 +136,27 @@ def main():
             sys.executable, str(deploy / "build_trt_engine_python.py"), "--onnx", str(onnx),
             "--engine", str(engine),
         ]
-    commands = [
-        export_command,
-        build_command,
-        [sys.executable, str(benchmark / "benchmark_trt_protocol.py"), "--engine", str(engine),
+    benchmark_command = [
+        sys.executable, str(benchmark / "benchmark_trt_protocol.py"), "--engine", str(engine),
          "--model", args.model, "--output-csv", str(benchmark_csv), "--run-id", run_id,
          "--framework", args.framework, "--images", str(args.images), "--warmup", str(args.warmup),
          "--iterations", str(args.iterations), "--preprocess", "letterbox",
-         "--dataset", DATASET_NAMES[args.dataset_protocol], "--seed", str(args.seed)],
+         "--dataset", DATASET_NAMES[args.dataset_protocol], "--seed", str(args.seed),
+         "--checkpoint-sha256", provenance["checkpoint_sha256"],
+         "--config-sha256", provenance["config_sha256"],
+         "--training-taxonomy", args.training_taxonomy,
+         "--evaluation-taxonomy", args.evaluation_taxonomy,
+         "--postprocess", args.postprocess,
     ]
-    for command in commands:
-        subprocess.run(command, cwd=experiments_dir, check=True)
-        if command is build_command and not engine.is_file():
+    if engine_is_reusable(engine, provenance):
+        print(f"[TensorRT] reusing hash-matched engine: {engine}", flush=True)
+    else:
+        for command in (export_command, build_command):
+            subprocess.run(command, cwd=experiments_dir, check=True)
+        if not engine.is_file():
             raise RuntimeError(f"TensorRT builder completed without creating engine: {engine}")
+        write_engine_provenance(engine, provenance)
+    subprocess.run(benchmark_command, cwd=experiments_dir, check=True)
     with benchmark_csv.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     run_rows = {

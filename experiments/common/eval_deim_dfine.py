@@ -19,6 +19,7 @@ import os
 import sys
 import json
 import argparse
+import gc
 import logging
 from pathlib import Path
 from copy import deepcopy
@@ -43,6 +44,15 @@ from common.det_eval_metrics import (
 from common.detr_eval_utils import log_detr_eval_summary, run_detr_benchmark
 from common.result_paths import result_csv, run_metadata
 from common.dataset_protocol import apply_detr_protocol_overrides
+from common.hierarchical_eval import (
+    HIERARCHICAL_EVAL_CHOICES,
+    collapse_ground_truth,
+    collapse_predictions,
+    compute_coco_metrics,
+    hierarchical_eval_spec,
+    hierarchical_metadata,
+    sha256_file,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,6 +136,24 @@ class RouterStatsCollector:
 
 def _unwrap_module(m: Any) -> Any:
     return m.module if hasattr(m, "module") else m
+
+
+def _strict_verify_checkpoint_model(model: Any, checkpoint_path: str, use_ema: bool) -> None:
+    """Reload the exact evaluated state with strict=True before inference."""
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    if not isinstance(checkpoint, dict):
+        raise TypeError(f"checkpoint is not a state dictionary: {checkpoint_path}")
+    if use_ema and isinstance(checkpoint.get("ema"), dict):
+        source_state = checkpoint["ema"].get("module")
+    else:
+        source_state = checkpoint.get("model")
+    if not isinstance(source_state, dict):
+        raise KeyError(f"checkpoint has no evaluated model state: {checkpoint_path}")
+    _unwrap_module(model).load_state_dict(source_state, strict=True)
+    LOG.info("Checkpoint compatibility verified with strict=True: %s", checkpoint_path)
 
 
 def _set_caip_static_keep_eval(model: Any, enabled: bool) -> Dict[str, Any]:
@@ -653,14 +681,35 @@ def main():
                         help="Dataset display name for CSV (auto-detect from config paths)")
     parser.add_argument("--output-csv", default=None,
                         help="CSV path (default: experiments/reports/<protocol>/eval_metrics.csv)")
+    parser.add_argument(
+        "--fine-grained-output-csv",
+        default=None,
+        help="Original-taxonomy CSV path used with --hierarchical-eval",
+    )
+    parser.add_argument(
+        "--hierarchical-eval",
+        choices=HIERARCHICAL_EVAL_CHOICES,
+        help="Remap category IDs after native postprocessing; no NMS or score fusion",
+    )
     protocol = parser.add_mutually_exclusive_group()
     protocol.add_argument("--dairv2x-vehicle5", dest="dataset_protocol", action="store_const", const="dairv2x_vehicle5")
     protocol.add_argument("--dairv2x-vehicle8", dest="dataset_protocol", action="store_const", const="dairv2x_vehicle8")
     protocol.add_argument("--uadetrac-vehicle1", dest="dataset_protocol", action="store_const", const="uadetrac_vehicle1")
     protocol.add_argument("--uadetrac-vehicle4", dest="dataset_protocol", action="store_const", const="uadetrac_vehicle4")
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--skip-pytorch-benchmark",
+        action="store_true",
+        help="Skip diagnostic PyTorch speed timing; TensorRT results are recorded separately.",
+    )
     parser.add_argument("--splits", default="val,test",
                         help="Comma-separated eval splits to run (default: val,test)")
+    parser.add_argument(
+        "--eval-num-workers",
+        type=int,
+        default=None,
+        help="Override evaluation DataLoader workers (does not change predictions).",
+    )
     parser.add_argument(
         "--disable-pruning",
         action="store_true",
@@ -706,6 +755,24 @@ def main():
     resolved_protocol = apply_detr_protocol_overrides(
         protocol_overrides, config_path, args.dataset_protocol
     )
+    if args.hierarchical_eval:
+        expected_protocol = hierarchical_eval_spec(args.hierarchical_eval)[
+            "training_protocol"
+        ]
+        if resolved_protocol != expected_protocol:
+            parser.error(
+                f"--hierarchical-eval {args.hierarchical_eval} requires "
+                f"--{expected_protocol.replace('_', '-')}; got {resolved_protocol or 'none'}"
+            )
+        # A resume evaluation must not depend on the historical COCO tuning
+        # initialization path. The selected checkpoint is loaded exactly below.
+        protocol_overrides["tuning"] = None
+    if args.eval_num_workers is not None:
+        if args.eval_num_workers < 0:
+            parser.error("--eval-num-workers must be non-negative")
+        protocol_overrides.setdefault("val_dataloader", {})["num_workers"] = (
+            args.eval_num_workers
+        )
 
     # Auto-detect dataset name from config path
     dataset_name = args.dataset_name
@@ -767,6 +834,7 @@ def main():
     if resume_path:
         resume_path = _resolve_resume_path(resume_path) or resume_path
     cfg.resume = resume_path
+    checkpoint_sha256 = sha256_file(resume_path) if args.hierarchical_eval else ""
 
     solver.eval()
 
@@ -774,6 +842,8 @@ def main():
     model = solver.ema.module if solver.ema else solver.model
     model.to(device)
     model.eval()
+    if args.hierarchical_eval:
+        _strict_verify_checkpoint_model(model, resume_path, solver.ema is not None)
 
     # Ensure CAIP / encoder epoch-dependent scheduling matches training epoch.
     enc_epoch = int(args.epoch) if args.epoch is not None else int(getattr(solver, "last_epoch", 0))
@@ -817,14 +887,27 @@ def main():
     remap_mscoco = bool(yaml_cfg.get("remap_mscoco_category", False))
 
     cfg_stub = _config_stub_for_benchmark(yaml_cfg, config_path)
-    bench_dict = run_detr_benchmark(model, cfg_stub, args.framework, device, LOG)
+    bench_dict = (
+        None
+        if args.skip_pytorch_benchmark
+        else run_detr_benchmark(model, cfg_stub, args.framework, device, LOG)
+    )
 
     # Write CSV
     output_dir = Path(cfg.yaml_cfg.get("output_dir", "./outputs"))
     csv_path = Path(args.output_csv) if args.output_csv else result_csv("eval_metrics")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
+    fine_csv_path = None
+    if args.hierarchical_eval:
+        fine_csv_path = (
+            Path(args.fine_grained_output_csv)
+            if args.fine_grained_output_csv
+            else csv_path.with_name("fine_grained_eval_metrics.csv")
+        )
+        fine_csv_path.parent.mkdir(parents=True, exist_ok=True)
     split_names = [s.strip() for s in args.splits.split(",") if s.strip()]
     append_csv = csv_path.exists()
+    append_fine_csv = bool(fine_csv_path and fine_csv_path.exists())
     wrote_any = False
     router_stats = RouterStatsCollector() if args.router_stats else None
 
@@ -871,7 +954,56 @@ def main():
         predictions_path.write_text(json.dumps(preds), encoding="utf-8")
         LOG.info("Wrote %s", predictions_path)
         LOG.info("Computing CaS-compatible metrics from %s ...", ann_file)
-        metrics, class_names, weather_buckets = compute_cas_metrics(ann_file, preds, dataset_name)
+        metadata = run_metadata(
+            run_id=args.run_id or f"{output_dir.parent.name}/{output_dir.name}",
+            framework=args.framework,
+            model=model_name,
+            dataset=dataset_name,
+            seed=args.seed if args.seed is not None else cfg.yaml_cfg.get("seed", ""),
+        )
+        if args.hierarchical_eval:
+            fine_metrics, fine_class_names, fine_weather_buckets = compute_cas_metrics(
+                ann_file, preds, dataset_name
+            )
+            fine_metadata = {
+                **metadata,
+                "training_taxonomy": resolved_protocol,
+                "evaluation_taxonomy": resolved_protocol,
+                "postprocess": "native",
+                "checkpoint_sha256": checkpoint_sha256,
+                "prediction_file": str(predictions_path.resolve()),
+            }
+            write_eval_csv(
+                fine_csv_path,
+                model=model_name,
+                dataset=dataset_name,
+                eval_split=split_name,
+                metrics=fine_metrics,
+                class_names=fine_class_names,
+                append=append_fine_csv,
+                benchmark=bench_dict,
+                weather_buckets=fine_weather_buckets or None,
+                metadata=fine_metadata,
+            )
+            append_fine_csv = True
+
+            source_gt = _build_coco_gt_dict(ann_file)
+            collapsed_gt = collapse_ground_truth(source_gt, args.hierarchical_eval)
+            collapsed_preds = collapse_predictions(preds, args.hierarchical_eval)
+            if len(collapsed_preds) != len(preds):
+                raise RuntimeError("hierarchical label collapse changed prediction count")
+            collapsed_path = predictions_dir / f"predictions_{split_name}_collapsed.json"
+            collapsed_path.write_text(json.dumps(collapsed_preds), encoding="utf-8")
+            LOG.info("Wrote %s", collapsed_path)
+            metrics = compute_coco_metrics(collapsed_gt, collapsed_preds)
+            class_names = [str(item["name"]) for item in collapsed_gt["categories"]]
+            weather_buckets = []
+            metadata.update(hierarchical_metadata(args.hierarchical_eval, checkpoint_sha256))
+            metadata["prediction_file"] = str(collapsed_path.resolve())
+        else:
+            metrics, class_names, weather_buckets = compute_cas_metrics(
+                ann_file, preds, dataset_name
+            )
         log_detr_eval_summary(LOG, split_name, metrics, bench_dict)
 
         write_eval_csv(
@@ -884,16 +1016,18 @@ def main():
             append=append_csv,
             benchmark=bench_dict,
             weather_buckets=weather_buckets or None,
-            metadata=run_metadata(
-                run_id=args.run_id or f"{output_dir.parent.name}/{output_dir.name}",
-                framework=args.framework,
-                model=model_name,
-                dataset=dataset_name,
-                seed=args.seed if args.seed is not None else cfg.yaml_cfg.get("seed", ""),
-            ),
+            metadata=metadata,
         )
         append_csv = True
         wrote_any = True
+
+        # Top-300 DETR prediction lists are large. Release each split before
+        # constructing the next DataLoader so forked workers do not inherit
+        # both the fine-grained and collapsed copies.
+        del preds
+        if args.hierarchical_eval:
+            del source_gt, collapsed_gt, collapsed_preds
+        gc.collect()
 
     if wrote_any:
         LOG.info("Wrote %s", csv_path)
@@ -906,15 +1040,17 @@ def main():
         router_path.write_text(json.dumps(router_stats.to_dict(), indent=2), encoding="utf-8")
         LOG.info("Wrote %s", router_path)
 
-    cd_wrote = _maybe_run_cross_domain_csv_row(
-        cfg=cfg,
-        model=model,
-        postprocessor=solver.postprocessor,
-        device=device,
-        csv_path=csv_path,
-        model_name=model_name,
-        bench_dict=bench_dict,
-    )
+    cd_wrote = False
+    if not args.hierarchical_eval:
+        cd_wrote = _maybe_run_cross_domain_csv_row(
+            cfg=cfg,
+            model=model,
+            postprocessor=solver.postprocessor,
+            device=device,
+            csv_path=csv_path,
+            model_name=model_name,
+            bench_dict=bench_dict,
+        )
     if cd_wrote:
         wrote_any = True
 
