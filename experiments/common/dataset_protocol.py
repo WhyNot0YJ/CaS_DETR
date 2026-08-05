@@ -155,7 +155,8 @@ def _dataset_update(
     rtdetr_layout: bool,
 ) -> Dict[str, Any]:
     if rtdetr_layout:
-        return {"data_root": str(root), "img_folder": str(root)}
+        img_folder = root if dataset == "dairv2x" else root / split
+        return {"data_root": str(root), "img_folder": str(img_folder)}
     img_folder = root if dataset == "dairv2x" else root / split
     return {
         "img_folder": str(img_folder),
