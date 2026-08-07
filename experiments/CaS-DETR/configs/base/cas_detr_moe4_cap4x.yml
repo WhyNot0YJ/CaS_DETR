@@ -2,8 +2,11 @@ __include__: [
   './cas_deim.yml'
 ]
 
-# Paper-aligned full CaS-DETR anchor.  Dataset-specific experiment configs
-# inherit this block and override only the factor being ablated.
+# Paper-aligned full CaS-DETR anchor: all three decoder layers are MoE with
+# random (Xavier) experts.  `moe_symmetry_break_std` is left unset so the
+# capacity scan (0.5x/1x/2x/4x, which overrides `dim_feedforward`) stays random
+# and varies exactly one factor.  Stack `base/cas_detr_moe_upcycle.yml` on the
+# width-matched 4x anchor to load the pretrained dense FFN instead.
 HybridEncoder:
   enable_cas_predictor: True
   token_keep_ratio: 0.3
@@ -20,6 +23,3 @@ DFINETransformer:
 
 DEIMCriterion:
   decoder_moe_balance_weight: 0.005
-
-moe_ffn_init:
-  source: pretrained/deim_dfine_hgnetv2_s_coco_120e.pth

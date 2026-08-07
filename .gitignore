@@ -201,3 +201,6 @@ experiments/**/dataset/
 
 # Generated evaluation logs and predictions
 /experiments/**/logs/**/*.json
+
+# Root-level resume training logs
+/resume10_logs/

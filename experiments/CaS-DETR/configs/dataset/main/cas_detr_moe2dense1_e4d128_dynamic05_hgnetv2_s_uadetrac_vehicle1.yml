@@ -1,0 +1,15 @@
+__include__: [
+  '../../deim_dfine/deim_hgnetv2_s_uadetrac.yml',
+  '../../base/cas_detr_hybrid_moe_e4d128.yml'
+]
+
+output_dir: ./outputs/main/cas_detr_moe2dense1_e4d128_dynamic05_hgnetv2_s_uadetrac
+
+# Layer order [MoE, MoE, Dense]: MoE on layers 0-1 for input-adaptive
+# refinement, dense on layer 2 (the eval layer) so the final box regression
+# keeps the deterministic, fully pretrained FFN.
+DFINETransformer:
+  moe_layer_indices: [0, 1]
+
+HybridEncoder:
+  token_keep_ratio: 0.5

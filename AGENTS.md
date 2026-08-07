@@ -19,8 +19,8 @@
 
 | 数据集 | 协议 | 类别数 | 说明 |
 | --- | --- | ---: | --- |
-| DAIR-V2X | `dairv2x_vehicle5` | 5 | 默认 |
-| DAIR-V2X | `dairv2x_vehicle8` | 8 | 历史协议，必须显式指定 |
+| DAIR-V2X | `dairv2x_vehicle8` | 8 | 默认 |
+| DAIR-V2X | `dairv2x_vehicle5` | 5 | 历史协议，必须显式指定 |
 | UA-DETRAC | `uadetrac_vehicle1` | 1 | 默认 |
 | UA-DETRAC | `uadetrac_vehicle4` | 4 | 历史协议，必须显式指定 |
 
@@ -33,7 +33,7 @@
 - UA Vehicle4：保留原始四类。
 
 默认路由来自 `experiments/common/dataset_protocol.py`。不传协议参数时使用
-Vehicle5/Vehicle1；旧协议必须使用对应的 `--dairv2x-vehicle8` 或
+Vehicle8/Vehicle1；旧协议必须使用对应的 `--dairv2x-vehicle5` 或
 `--uadetrac-vehicle4`。checkpoint、数据集、日志和报告协议必须完全一致，禁止
 跨协议恢复、评测或覆盖结果。
 

@@ -17,11 +17,11 @@ ROOT_DIR="/root/autodl-tmp/CaS_DETR"
 cd "${ROOT_DIR}"
 
 # --- Ours (CaS-DETR full) checkpoint ---
-CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
+CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
 RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # --- Baseline (all-off) checkpoint ---
-BASELINE_CONFIG_A="${BASELINE_CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_dairv2x.yml}"
+BASELINE_CONFIG_A="${BASELINE_CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_all_off_hgnetv2_s_dairv2x.yml}"
 BASELINE_RESUME_A="${BASELINE_RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_all_off_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # --- Test set annotation + image root ---

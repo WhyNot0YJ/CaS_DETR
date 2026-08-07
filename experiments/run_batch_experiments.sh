@@ -23,7 +23,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   - 完成后生成汇总报告
 #
 # 使用方法：
-#   ./run_batch_experiments.sh                                 # 默认 Vehicle5，运行完整实验矩阵
+#   ./run_batch_experiments.sh                                 # 默认 Vehicle8，运行完整实验矩阵
 #   ./run_batch_experiments.sh --test                          # 测试模式：运行所有配置，每个只跑2个epoch
 #   ./run_batch_experiments.sh --rtdetrv2                      # 官方 RT-DETR v2（rtdetrv2_pytorch + train_adapter.py，默认 --cas-eval）
 #   ./run_batch_experiments.sh --rt-detr                       # 与 --rtdetrv2 相同（v1 已移除，仅保留 v2）
@@ -34,7 +34,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #                                                               # DEIM baseline vs. CaS 主实验：Dense 首层 + 后两层 MoE
 #   ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only
 #   ./run_batch_experiments.sh --cas-dynamic-base --dairv2x    # DAIR dynamic base .5/.7（.3 复用主实验）
-#   ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x
+#   ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x（4x 宽度匹配自动 upcycle，其余随机）
 #   CAS_TOKEN_POLICY_CONFIG=<full.yml> CAS_TOKEN_POLICY_CHECKPOINT=<best.pth> ./run_batch_experiments.sh --cas-token-policy-test
 #                                                               # 同一 D5 checkpoint 的 dynamic/fixed .3/.7/1.0 test-only 对照
 #   ./run_batch_experiments.sh --cas-all-train --dairv2x       # 所有 DAIR CaS 训练组（不含 native DEIM 与 token policy test）
@@ -69,14 +69,14 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --s                             # 只运行所有 s 规模 YOLO / YOLOX
 #   ./run_batch_experiments.sh --m                             # 只运行所有 m 规模 YOLO / YOLOX
 #   ./run_batch_experiments.sh --custom cfg1.yaml cfg2.yaml    # 自定义配置列表
-#   ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x cas-component-decoder-only-dairv2x-vehicle5  # 使用内置键名选择
+#   ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x cas-component-decoder-only-dairv2x-vehicle8  # 使用内置键名选择
 #   ./run_batch_experiments.sh --dairv2x                       # 只保留 DAIR-V2X 维度（可叠 --rtdetrv2 / --cas-main 等）
 #   ./run_batch_experiments.sh --uadetrac                     # 只保留 UA-DETRAC 维度
 #   ./run_batch_experiments.sh --dataset dairv2x --rtdetrv2    # 同上：--dataset 与 --dairv2x 等价；可与 --rtdetrv2 任意顺序组合
 #   ./run_batch_experiments.sh --rtdetrv2 --dataset dairv2x     # 同上
 #   ./run_batch_experiments.sh --dataset dairv2x --rt-detr      # --rt-detr 与 --rtdetrv2 相同
 #   ./run_batch_experiments.sh --dataset dairv2x,uadetrac     # 同传 --dairv2x --uadetrac（两者都选则不按数据集筛）
-#   ./run_batch_experiments.sh --dairv2x-vehicle8              # DAIR-V2X 旧 8 类协议
+#   ./run_batch_experiments.sh --dairv2x-vehicle5              # DAIR-V2X 旧 5 类协议（默认 Vehicle8）
 #   ./run_batch_experiments.sh --uadetrac-vehicle4             # UA-DETRAC 旧 4 类协议
 #   ./run_batch_experiments.sh --uadetrac --yolo --s           # UA-DETRAC 默认 Vehicle1
 #   ./run_batch_experiments.sh --select                        # 交互式选择待运行配置
@@ -112,7 +112,7 @@ SKIPPED_EXPERIMENTS=0
 TEST_MODE=false  # 测试模式标志
 SKIP_CONFIRM=false  # --yes：跳过「是否开始」确认，便于一键 / CI
 DRY_RUN=false
-DAIRV2X_VEHICLE5_MODE=true
+DAIRV2X_VEHICLE5_MODE=false
 UADETRAC_VEHICLE1_MODE=true
 DEFAULT_ALL_PROTOCOLS=false
 # --dairv2x / --uadetrac（或 --dataset）解析后写入；二者同时为 true 时不筛选
@@ -381,42 +381,55 @@ declare -A RTDETRV2_ADAPTER_CONFIGS=(
 
 # CaS-DETR paper-aligned experiment plan.  Native DEIM is intentionally not
 # mirrored as an all-off CaS config; run it with --deim under the same protocol.
+# Main experiments: the two hybrid-decoder placements (layer order in the name,
+# layer0->layer2).  The dense FFN is width-matched and inherits the pretrained
+# weights through `tuning`; the 128-wide experts stay random.
 declare -a CAS_MAIN_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/main/cas_detr_dense1_moe2_e4d128_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    "CaS-DETR/configs/dataset/main/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_uadetrac_vehicle1.yml"
+    "CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d128_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    "CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d128_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    "CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d128_dynamic05_hgnetv2_s_uadetrac_vehicle1.yml"
+    "CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d128_dynamic05_hgnetv2_s_uadetrac_vehicle1.yml"
 )
 
 declare -a CAS_COMPONENT_ABLATION_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x_vehicle8.yml"
 )
 
 # DAIR dynamic .3 is the main anchor.  This group adds only .5 and .7.
 declare -a CAS_DYNAMIC_BASE_ABLATION_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x_vehicle5.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic07_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x_vehicle8.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic07_hgnetv2_s_dairv2x_vehicle8.yml"
 )
 
 # E=4 and top-k=2 stay fixed.  Capacity scans remain separate from the hybrid
 # main decoder and therefore include their own .5x/1x/2x/4x anchors.
+# All four arms use random (Xavier) expert init, so width is the only variable.
 declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap4x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap4x_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
 )
 
+# MoE expert initialization is built into the tuning load: width-matched
+# experts (the 4x anchor) are upcycled from the pretrained dense FFN with a 1%
+# symmetry-breaking perturbation by default, so no dedicated config is needed.
+# Set `moe_symmetry_break_std: 0` in a config to force random initialization.
+
 declare -A CAS_EXPERIMENT_CONFIGS=(
-    ["cas-main-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/main/cas_detr_dense1_moe2_e4d128_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    ["cas-main-uadetrac-vehicle1"]="CaS-DETR/configs/dataset/main/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_uadetrac_vehicle1.yml"
-    ["cas-component-token-only-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    ["cas-component-decoder-only-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x_vehicle5.yml"
-    ["cas-dynamic-base05-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x_vehicle5.yml"
-    ["cas-dynamic-base07-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic07_hgnetv2_s_dairv2x_vehicle5.yml"
-    ["cas-moe-cap05x-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    ["cas-moe-cap1x-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    ["cas-moe-cap2x-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
-    ["cas-moe-cap4x-dairv2x-vehicle5"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap4x_dynamic03_hgnetv2_s_dairv2x_vehicle5.yml"
+    ["cas-main-moe2dense1-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d128_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-main-dense1moe2-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d128_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-main-moe2dense1-uadetrac-vehicle1"]="CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d128_dynamic05_hgnetv2_s_uadetrac_vehicle1.yml"
+    ["cas-main-dense1moe2-uadetrac-vehicle1"]="CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d128_dynamic05_hgnetv2_s_uadetrac_vehicle1.yml"
+    ["cas-component-token-only-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-component-decoder-only-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-dynamic-base05-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-dynamic-base07-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic07_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-moe-cap05x-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-moe-cap1x-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-moe-cap2x-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
+    ["cas-moe-cap4x-dairv2x-vehicle8"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap4x_dynamic03_hgnetv2_s_dairv2x_vehicle8.yml"
 )
 
 cas_result_group() {
@@ -723,7 +736,7 @@ parse_arguments() {
     build_all_configs
     SCOPE_DAIRV2X=false
     SCOPE_UADETRAC=false
-    DAIRV2X_VEHICLE5_MODE=true
+    DAIRV2X_VEHICLE5_MODE=false
     UADETRAC_VEHICLE1_MODE=true
     DEFAULT_ALL_PROTOCOLS=false
     CAS_TOKEN_POLICY_TEST=false
@@ -1332,7 +1345,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --cas-main --dataset dairv2x,uadetrac  # CaS 主实验：D5 .3 与 U1 .5"
         echo "  ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only"
         echo "  ./run_batch_experiments.sh --cas-dynamic-base --dairv2x    # DAIR dynamic base .5/.7（.3 复用主实验）"
-        echo "  ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x"
+        echo "  ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x（Xavier 随机初始化）"
         echo "  ./run_batch_experiments.sh --cas-all-train --dairv2x       # 全部 DAIR CaS 训练组"
         echo "  CAS_TOKEN_POLICY_CONFIG=<full.yml> CAS_TOKEN_POLICY_CHECKPOINT=<best.pth> ./run_batch_experiments.sh --cas-token-policy-test"
         echo "  ./run_batch_experiments.sh --dqm_detr                      # DQM-DETR 全部消融+主实验（3 数据集 × 消融 + 主实验）"
@@ -1372,13 +1385,13 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --k0.5                          # 只跑路径名含 ratio0.5 的配置"
         echo "  ./run_batch_experiments.sh --k0.7                          # 只运行 Keep Ratio 0.7"
         echo "  ./run_batch_experiments.sh --custom cfg1.yaml cfg2.yaml    # 指定配置文件路径"
-        echo "  ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x cas-component-decoder-only-dairv2x-vehicle5  # 通过键名选择"
+        echo "  ./run_batch_experiments.sh --keys rtdetrv2-r18-dairv2x cas-component-decoder-only-dairv2x-vehicle8  # 通过键名选择"
         echo "  ./run_batch_experiments.sh --dairv2x                       # 数据集筛：仅 DAIR-V2X（可叠 --rtdetrv2 等）"
         echo "  ./run_batch_experiments.sh --uadetrac                      # 数据集筛：仅 UA-DETRAC"
         echo "  ./run_batch_experiments.sh --dataset dairv2x --rtdetrv2     # 推荐：数据集 + 实验类型（顺序任意；--rt-detr 同 --rtdetrv2）"
         echo "  ./run_batch_experiments.sh --dataset dairv2x,uadetrac       # 同传 --dairv2x --uadetrac（不筛）"
-        echo "  ./run_batch_experiments.sh                                  # 默认 Vehicle5 全部主模型"
-        echo "  ./run_batch_experiments.sh --dairv2x-vehicle8               # DAIR-V2X 旧 8 类协议"
+        echo "  ./run_batch_experiments.sh                                  # 默认 Vehicle8 全部主模型"
+        echo "  ./run_batch_experiments.sh --dairv2x-vehicle5               # DAIR-V2X 旧 5 类协议（默认 Vehicle8）"
         echo "  ./run_batch_experiments.sh --uadetrac-vehicle4              # UA-DETRAC 旧 4 类协议"
         echo "  ./run_batch_experiments.sh --dry-run --uadetrac --yolo --s  # 查看 UA Vehicle1 队列"
         echo "  ./run_batch_experiments.sh --select                        # 交互式选择"

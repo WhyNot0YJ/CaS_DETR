@@ -15,41 +15,41 @@ from dataset_protocol import (
 EXPERIMENTS = Path(__file__).resolve().parent.parent
 CAS_DAIR = (
     EXPERIMENTS
-    / "CaS-DETR/configs/dataset/ablation/"
+    / "CaS-DETR/configs/dataset/ablation/archive/"
     "cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
 )
 CAS_UA = (
     EXPERIMENTS
-    / "CaS-DETR/configs/dataset/ablation/"
+    / "CaS-DETR/configs/dataset/ablation/archive/"
     "cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_uadetrac.yml"
 )
 
 
 class DatasetProtocolTest(unittest.TestCase):
-    def test_vehicle5_is_the_dair_default(self):
+    def test_vehicle8_is_the_dair_default(self):
         update = {}
         protocol = apply_detr_protocol_overrides(update, CAS_DAIR, None)
 
-        self.assertEqual(protocol, "dairv2x_vehicle5")
-        self.assertEqual(update["num_classes"], 5)
-        self.assertIn("DAIR-V2X-Vehicle5", update["train_dataloader"]["dataset"]["ann_file"])
-        self.assertEqual(
-            update["output_dir"],
-            "./outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x",
-        )
-
-    def test_vehicle8_is_an_explicit_legacy_override(self):
-        update = {}
-        protocol = apply_detr_protocol_overrides(
-            update, CAS_DAIR, "dairv2x_vehicle8"
-        )
-
         self.assertEqual(protocol, "dairv2x_vehicle8")
         self.assertEqual(update["num_classes"], 8)
-        self.assertIn("/DAIR-V2X/annotations/", update["val_dataloader"]["dataset"]["ann_file"])
+        self.assertIn("/DAIR-V2X/annotations/", update["train_dataloader"]["dataset"]["ann_file"])
         self.assertEqual(
             update["output_dir"],
             "./outputs/dairv2x_vehicle8/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x",
+        )
+
+    def test_vehicle5_is_an_explicit_legacy_override(self):
+        update = {}
+        protocol = apply_detr_protocol_overrides(
+            update, CAS_DAIR, "dairv2x_vehicle5"
+        )
+
+        self.assertEqual(protocol, "dairv2x_vehicle5")
+        self.assertEqual(update["num_classes"], 5)
+        self.assertIn("DAIR-V2X-Vehicle5", update["val_dataloader"]["dataset"]["ann_file"])
+        self.assertEqual(
+            update["output_dir"],
+            "./outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x",
         )
 
     def test_uadetrac_vehicle1_is_the_default(self):

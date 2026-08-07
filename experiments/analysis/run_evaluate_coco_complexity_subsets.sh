@@ -44,17 +44,17 @@ FIXED_KEEP_07="${FIXED_KEEP_07:-0.7}"
 FIXED_KEEP_10="${FIXED_KEEP_10:-1.0}"
 
 # --- configs and checkpoints, defaults aligned with run_visualize_dual_aperture_dual_ckpt.sh for dynamic ---
-CONFIG_FIXED_03="${CONFIG_FIXED_03:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x.yml}"
+CONFIG_FIXED_03="${CONFIG_FIXED_03:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x.yml}"
 RESUME_FIXED_03="${RESUME_FIXED_03:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_keep03_fixed_hgnetv2_s_dairv2x/best_stg2.pth}"
 
-CONFIG_FIXED_07="${CONFIG_FIXED_07:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x.yml}"
+CONFIG_FIXED_07="${CONFIG_FIXED_07:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x.yml}"
 RESUME_FIXED_07="${RESUME_FIXED_07:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_keep07_fixed_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # Fixed 1.0: repository baseline with full keep ratio, no CAIP or CASS
-CONFIG_FIXED_10="${CONFIG_FIXED_10:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_only_hgnetv2_s_dairv2x.yml}"
+CONFIG_FIXED_10="${CONFIG_FIXED_10:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_only_hgnetv2_s_dairv2x.yml}"
 RESUME_FIXED_10="${RESUME_FIXED_10:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_only_hgnetv2_s_dairv2x/best_stg2.pth}"
 
-CONFIG_DYNAMIC="${CONFIG_DYNAMIC:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
+CONFIG_DYNAMIC="${CONFIG_DYNAMIC:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
 RESUME_DYNAMIC="${RESUME_DYNAMIC:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 if [[ ! -f "${GT_JSON}" ]]; then

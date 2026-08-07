@@ -10,7 +10,7 @@ import yaml
 
 
 DEFAULT_PROTOCOLS = {
-    "dairv2x": "dairv2x_vehicle5",
+    "dairv2x": "dairv2x_vehicle8",
     "uadetrac": "uadetrac_vehicle1",
 }
 PROTOCOLS = (

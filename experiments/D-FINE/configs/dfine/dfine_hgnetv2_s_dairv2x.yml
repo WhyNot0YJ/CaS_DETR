@@ -3,7 +3,7 @@ __include__: [
   '../dataset/dairv2x_detection.yml',
 ]
 
-output_dir: ./output/dfine_hgnetv2_s_dairv2x
+output_dir: ./outputs/dfine_hgnetv2_s_dairv2x
 
 tuning: pretrained/dfine_s_coco.pth
 

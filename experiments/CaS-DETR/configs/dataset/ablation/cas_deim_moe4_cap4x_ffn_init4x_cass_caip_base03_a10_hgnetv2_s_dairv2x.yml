@@ -1,9 +1,0 @@
-__include__: [
-  './cas_deim_moe4_cap4x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml'
-]
-
-output_dir: ./outputs/ablation/cas_deim_moe4_cap4x_ffn_init4x_cass_caip_base03_a10_hgnetv2_s_dairv2x
-
-# Same-width initialization control: copy the complete trained 4x expert FFNs.
-moe_ffn_init:
-  source: ../../cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.pth

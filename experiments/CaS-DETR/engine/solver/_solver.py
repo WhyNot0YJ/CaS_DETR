@@ -8,7 +8,6 @@ import atexit
 
 from ..misc import dist_utils
 from ..core import BaseConfig
-from .moe_ffn_init import load_structured_moe_ffn_init
 
 
 def to(m: nn.Module, device: str):
@@ -51,15 +50,6 @@ class BaseSolver(object):
         if self.cfg.tuning:
             print(f'Tuning checkpoint from {self.cfg.tuning}')
             self.load_tuning_state(self.cfg.tuning)
-
-        moe_ffn_init = self.cfg.yaml_cfg.get('moe_ffn_init')
-        if moe_ffn_init and not self.cfg.resume:
-            report = load_structured_moe_ffn_init(
-                self.model,
-                source=moe_ffn_init['source'],
-                root=Path(__file__).resolve().parents[2],
-            )
-            print(f'Load structured MoE FFN initialization, {report}')
 
         self.model = dist_utils.warp_model(
             self.model.to(device), sync_bn=cfg.sync_bn, find_unused_parameters=cfg.find_unused_parameters
@@ -186,6 +176,14 @@ class BaseSolver(object):
         else:
             pretrain_state_dict = state['model']
 
+        # Lossless upcycling is the default for width-matched MoE experts: the
+        # pretrained dense FFN is copied into every expert plus a 1% perturbation
+        # to break router symmetry.  Width-mismatched experts (capacity scan)
+        # stay random.  Set `moe_symmetry_break_std: 0` to force random init.
+        symmetry_break_std = float(self.cfg.yaml_cfg.get('moe_symmetry_break_std', 0.01))
+        if symmetry_break_std > 0:
+            self._upcycle_moe_ffn(module, pretrain_state_dict, symmetry_break_std)
+
         # Adjust head parameters between datasets
         try:
             adjusted_state_dict = self._adjust_head_parameters(module.state_dict(), pretrain_state_dict)
@@ -195,6 +193,38 @@ class BaseSolver(object):
 
         module.load_state_dict(stat, strict=False)
         print(f'Load model.state_dict, {infos}')
+
+    @staticmethod
+    def _upcycle_moe_ffn(module, pretrain_state_dict, symmetry_break_std: float):
+        """Upcycle the pretrained dense FFN into same-width MoE experts in-place.
+
+        Because the top-k gate weights are renormalized to sum to one, copying
+        the dense FFN into every expert keeps the model identical to the
+        pretrained one.  Width mismatch (e.g. the capacity scan) or a missing
+        dense FFN skips the layer and leaves it random.  ``symmetry_break_std``
+        perturbs ``expert_w1`` so the experts differ and the router can learn;
+        with ``0.0`` all experts stay identical and the router gradient is zero.
+        """
+        target = module.state_dict()
+        gen = torch.Generator().manual_seed(0)
+        for key in sorted(k for k in target if k.endswith('decoder_moe_layer.expert_w1')):
+            prefix = key[:-len('decoder_moe_layer.expert_w1')]
+            dense_w1 = pretrain_state_dict.get(prefix + 'linear1.weight')
+            w1 = target[key]
+            if dense_w1 is None or dense_w1.shape != w1.shape[1:]:
+                print(f'[upcycle] skip {key}: width mismatch or no dense FFN, keep random init')
+                continue
+            e = w1.shape[0]
+            w1.copy_(dense_w1.unsqueeze(0).expand(e, -1, -1))
+            if symmetry_break_std > 0:
+                w1.add_(torch.empty_like(w1).normal_(generator=gen)
+                        * dense_w1.std().item() * symmetry_break_std)
+            target[prefix + 'decoder_moe_layer.expert_b1'].copy_(
+                pretrain_state_dict[prefix + 'linear1.bias'].unsqueeze(0).expand(e, -1))
+            target[prefix + 'decoder_moe_layer.expert_w2'].copy_(
+                pretrain_state_dict[prefix + 'linear2.weight'].unsqueeze(0).expand(e, -1, -1))
+            target[prefix + 'decoder_moe_layer.expert_b2'].copy_(
+                pretrain_state_dict[prefix + 'linear2.bias'].unsqueeze(0).expand(e, -1))
 
     @staticmethod
     def _matched_state(state: Dict[str, torch.Tensor], params: Dict[str, torch.Tensor]):

@@ -12,17 +12,17 @@ ROOT_DIR="/root/autodl-tmp/CaS_DETR"
 cd "${ROOT_DIR}"
 
 # Model A: DAIR-V2X (rows 1-2)
-CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
+CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
 RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # Model B: UA-DETRAC (rows 3-4)
-CONFIG_B="${CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml}"
+CONFIG_B="${CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml}"
 RESUME_B="${RESUME_B:-experiments/CaS-DETR/outputs/uadetrac_vehicle1/ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac/best_stg2.pth}"
 
 # Baseline models for the baseline column, third panel after original and heatmap.
-BASELINE_CONFIG_A="${BASELINE_CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_dairv2x.yml}"
+BASELINE_CONFIG_A="${BASELINE_CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_all_off_hgnetv2_s_dairv2x.yml}"
 BASELINE_RESUME_A="${BASELINE_RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_all_off_hgnetv2_s_dairv2x/best_stg2.pth}"
-BASELINE_CONFIG_B="${BASELINE_CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_all_off_hgnetv2_s_uadetrac.yml}"
+BASELINE_CONFIG_B="${BASELINE_CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_all_off_hgnetv2_s_uadetrac.yml}"
 BASELINE_RESUME_B="${BASELINE_RESUME_B:-experiments/CaS-DETR/outputs/uadetrac_vehicle1/ablation/cas_deim_all_off_hgnetv2_s_uadetrac/best_stg2.pth}"
 
 DEVICE="${DEVICE:-cuda}"

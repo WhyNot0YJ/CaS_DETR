@@ -37,11 +37,11 @@ mkdir -p "$OUTPUT_DIR"
 INFERENCE_RATIOS="${INFERENCE_RATIOS:-0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0}"
 
 # Model A (DAIR)
-CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
+CONFIG_A="${CONFIG_A:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml}"
 RESUME_A="${RESUME_A:-experiments/CaS-DETR/outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/best_stg2.pth}"
 
 # Model B (UA)
-CONFIG_B="${CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml}"
+CONFIG_B="${CONFIG_B:-experiments/CaS-DETR/configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac.yml}"
 RESUME_B="${RESUME_B:-experiments/CaS-DETR/outputs/uadetrac_vehicle1/ablation/base05_a10/cas_deim_moe4_cass_caip_base05_a10_hgnetv2_s_uadetrac/best_stg2.pth}"
 
 # Legend keys: order matches METRIC_INDICES default 0 1 3.

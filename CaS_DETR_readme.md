@@ -43,7 +43,7 @@ experiments/
 
 | 数据集 | 默认协议 | 旧协议 |
 | --- | --- | --- |
-| DAIR-V2X | `dairv2x_vehicle5` | `dairv2x_vehicle8` |
+| DAIR-V2X | `dairv2x_vehicle8` | `dairv2x_vehicle5` |
 | UA-DETRAC | `uadetrac_vehicle1` | `uadetrac_vehicle4` |
 
 DAIR Vehicle5 将 `Car/Truck/Van/Bus` 合并为 `vehicle`，保留
@@ -73,7 +73,7 @@ cd experiments/CaS-DETR
   -c configs/deim_dfine/cas_detr_hgnetv2_s_dairv2x.yml
 ```
 
-统一批量入口默认使用 Vehicle5/Vehicle1：
+统一批量入口默认使用 Vehicle8/Vehicle1：
 
 ```bash
 cd experiments
@@ -84,7 +84,7 @@ cd experiments
 旧协议必须显式指定：
 
 ```bash
-./run_batch_experiments.sh --dairv2x-vehicle8 --dairv2x --yolo --s
+./run_batch_experiments.sh --dairv2x-vehicle5 --dairv2x --yolo --s
 ./run_batch_experiments.sh --uadetrac-vehicle4 --uadetrac --yolo --s
 ```
 

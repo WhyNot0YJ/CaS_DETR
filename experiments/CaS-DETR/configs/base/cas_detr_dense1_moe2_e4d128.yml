@@ -2,8 +2,15 @@ __include__: [
   './cas_deim.yml'
 ]
 
-# CaS-DETR main decoder: a pretrained dense foundation layer followed by two
-# narrow token-routed expert layers for iterative refinement.
+# CaS-DETR hybrid decoder: two narrow token-routed expert layers followed by a
+# dense output layer.  layer 2 is the eval layer (num_layers=3, eval_idx=-1), so
+# the final box regression keeps the deterministic dense FFN and inherits the
+# COCO-pretrained weights through `tuning`, while layers 0/1 do the
+# input-adaptive refinement.
+#
+# Expert width (128) does not match the pretrained dense FFN width (1024), so
+# upcycling does not apply here; experts keep the default Xavier initialization
+# (`moe_symmetry_break_std` is only meaningful on the width-matched 4x anchor).
 HybridEncoder:
   enable_cas_predictor: True
   token_keep_ratio: 0.3
@@ -16,14 +23,9 @@ DFINETransformer:
   use_moe: True
   num_experts: 4
   moe_top_k: 2
-  moe_layer_indices: [1, 2]
+  moe_layer_indices: [0, 1]
   dense_dim_feedforward: 1024
   moe_dim_feedforward: 128
 
 DEIMCriterion:
   decoder_moe_balance_weight: 0.005
-
-# V-MoE-style dense-to-expert upcycling. Each narrow expert starts from the
-# most salient neurons of the corresponding COCO-pretrained dense FFN.
-moe_ffn_init:
-  source: pretrained/deim_dfine_hgnetv2_s_coco_120e.pth

@@ -7,6 +7,7 @@ Faster R-CNN (torchvision) 训练器 — 继承 BaseYOLOTrainer，
 import sys
 import time
 import math
+import json
 import logging
 import gc
 import os
@@ -18,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import yaml
 from torch.utils.data import DataLoader
 from PIL import Image
 import torchvision.transforms.functional as TF
@@ -141,6 +143,231 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         )
         return model
 
+    # ── training-time mAP evaluation ─────────────────────────────────
+
+    def _resolve_val_map_paths(self, data_yaml: str, val_img_dir: Path):
+        """Resolve the validation GT sources and collect validation image paths.
+
+        Returns:
+            (labels_meta_dir, coco_ann_file, val_img_paths) — either GT source may
+            be missing (mAP eval gracefully skips only when **both** are missing).
+        """
+        data_yaml_path = Path(data_yaml)
+        with data_yaml_path.open(encoding='utf-8') as fh:
+            data_cfg = yaml.safe_load(fh) or {}
+
+        root = data_yaml_path.parent.resolve()
+        path_field = str(data_cfg.get('path', '')).strip()
+        if path_field:
+            pc = Path(path_field)
+            if pc.is_absolute() and pc.is_dir():
+                root = pc
+
+        labels_meta_dir = self._resolve_labels_meta_dir(data_cfg, root, 'val')
+        coco_ann_file = self._resolve_coco_ann_file(data_cfg, root, 'val')
+
+        val_img_paths = sorted(
+            p
+            for ext in ('.jpg', '.jpeg', '.png')
+            for p in val_img_dir.rglob(f'*{ext}')
+        )
+        return labels_meta_dir, coco_ann_file, val_img_paths
+
+    def _load_val_map_gt(
+        self,
+        labels_meta_dir: Optional[Path],
+        coco_ann_file: Optional[Path],
+    ) -> Dict[str, Any]:
+        """Load validation GT keyed by image stem for training-time mAP.
+
+        Priority: ``labels_meta/val/*.json`` → ``val_coco_ann`` COCO JSON
+        (same two sources the post-training COCO evaluator accepts).
+        Parsed once and cached — the COCO JSON can be tens of MB.
+        """
+        cached = getattr(self, '_val_map_gt_cache', None)
+        if cached is not None:
+            return cached
+
+        meta_by_stem: Dict[str, Any] = {}
+        source = ''
+        if labels_meta_dir is not None and labels_meta_dir.is_dir():
+            for meta_path in sorted(labels_meta_dir.glob('*.json')):
+                try:
+                    meta_by_stem[meta_path.stem] = json.loads(
+                        meta_path.read_text(encoding='utf-8')
+                    )
+                except Exception:
+                    continue
+            if meta_by_stem:
+                source = f'labels_meta={labels_meta_dir}'
+        if not meta_by_stem and coco_ann_file is not None and coco_ann_file.is_file():
+            try:
+                meta_by_stem = self._load_coco_meta_by_stem(coco_ann_file)
+                source = f'coco_ann={coco_ann_file}'
+            except Exception as exc:
+                self.logger.warning('解析 val COCO 标注失败（训练期 mAP 不可用）: %s', exc)
+                meta_by_stem = {}
+        if meta_by_stem:
+            self.logger.info(
+                '✓ 训练期 mAP GT 源: %s (%d 张标注)', source, len(meta_by_stem),
+            )
+        self._val_map_gt_cache = meta_by_stem
+        return meta_by_stem
+
+    @torch.no_grad()
+    def _compute_val_map(
+        self,
+        model: nn.Module,
+        device: torch.device,
+        val_img_paths: List[Path],
+        labels_meta_dir: Optional[Path] = None,
+        coco_ann_file: Optional[Path] = None,
+        *,
+        max_eval_images: int = 0,
+        batch_size: int = 8,
+    ) -> Optional[Tuple[float, float]]:
+        """Compute COCO mAP on the validation set during training.
+
+        Returns ``(mAP@0.5, mAP@0.5:0.95)``, or ``None`` when no GT source
+        is usable, no images match, or pycocotools is unavailable.
+
+        Parameters:
+            max_eval_images: If > 0, evaluate only the first N images for speed.
+        """
+        from common.det_eval_metrics import run_coco_bbox_eval, coco_ap_at_iou50_all, coco_ap_at_iou50_95_all
+
+        meta_by_stem = self._load_val_map_gt(labels_meta_dir, coco_ann_file)
+        if not meta_by_stem:
+            return None
+
+        eval_images = [p for p in val_img_paths if p.stem in meta_by_stem]
+        if not eval_images:
+            return None
+
+        # ── optional subset ──
+        if max_eval_images > 0 and len(eval_images) > max_eval_images:
+            eval_images = eval_images[:max_eval_images]
+
+        model.eval()
+        imgsz = self._input_size()
+
+        coco_annotations: List[Dict[str, Any]] = []
+        coco_predictions: List[Dict[str, Any]] = []
+        img_sizes: Dict[int, Tuple[int, int]] = {}
+        ann_id = 0
+
+        for batch_start in range(0, len(eval_images), batch_size):
+            batch_paths = eval_images[batch_start: batch_start + batch_size]
+
+            # ── preprocess ──
+            images: List[torch.Tensor] = []
+            letterbox_params: List[Tuple[float, int, int]] = []
+            orig_sizes: List[Tuple[int, int]] = []
+            for p in batch_paths:
+                img = Image.open(p).convert('RGB')
+                w, h = img.size
+                orig_sizes.append((h, w))
+                image, scale, pad_left, pad_top = letterbox_image(
+                    TF.to_tensor(img), imgsz,
+                )
+                images.append(image.to(device))
+                letterbox_params.append((scale, pad_left, pad_top))
+
+            outputs = model(images)
+
+            for i_in_batch, (p, (scale, pad_left, pad_top), out) in enumerate(
+                zip(batch_paths, letterbox_params, outputs)
+            ):
+                img_idx = batch_start + i_in_batch
+                img_h, img_w = orig_sizes[i_in_batch]  # (H, W)
+                img_id = img_idx
+                img_sizes[img_id] = (int(img_w), int(img_h))
+
+                # ── GT from labels_meta / COCO annotations ──
+                raw = meta_by_stem[p.stem]
+                if isinstance(raw, dict) and 'objects' in raw:
+                    entries = raw['objects']
+                elif isinstance(raw, list):
+                    entries = raw
+                else:
+                    entries = []
+
+                for entry in entries:
+                    cls_id = int(entry['class_id'])
+                    if not (0 <= cls_id < self.num_classes):
+                        continue
+                    if 'bbox_xyxy' in entry:
+                        x1, y1, x2, y2 = map(float, entry['bbox_xyxy'][:4])
+                    elif 'bbox_yolo' in entry:
+                        byo = entry['bbox_yolo']
+                        cx, cy, bw, bh = byo['cx'], byo['cy'], byo['w'], byo['h']
+                        x1 = (cx - bw / 2.0) * img_w
+                        y1 = (cy - bh / 2.0) * img_h
+                        x2 = (cx + bw / 2.0) * img_w
+                        y2 = (cy + bh / 2.0) * img_h
+                    else:
+                        continue
+                    w_px, h_px = x2 - x1, y2 - y1
+                    if w_px <= 0 or h_px <= 0:
+                        continue
+                    ann_id += 1
+                    coco_annotations.append({
+                        'id': ann_id,
+                        'image_id': img_id,
+                        'category_id': cls_id + 1,
+                        'bbox': [x1, y1, w_px, h_px],
+                        'area': w_px * h_px,
+                        'iscrowd': 0,
+                    })
+
+                # ── predictions (unletterbox) ──
+                out = dict(out)
+                out['boxes'] = unletterbox_boxes(
+                    out['boxes'], (img_h, img_w), scale, pad_left, pad_top,
+                )
+                boxes = out['boxes']
+                scores = out['scores']
+                labels = out['labels'] - 1  # 1-indexed → 0-indexed
+
+                for box, score, label in zip(
+                    boxes.cpu().numpy(), scores.cpu().numpy(), labels.cpu().numpy()
+                ):
+                    cls = int(label)
+                    if not (0 <= cls < self.num_classes) or float(score) < 0.005:
+                        continue
+                    x1, y1, x2, y2 = map(float, box)
+                    w_px, h_px = x2 - x1, y2 - y1
+                    if w_px <= 0 or h_px <= 0:
+                        continue
+                    coco_predictions.append({
+                        'image_id': img_id,
+                        'category_id': cls + 1,
+                        'bbox': [x1, y1, w_px, h_px],
+                        'score': float(score),
+                    })
+
+        if not coco_annotations or not coco_predictions:
+            return None
+
+        # ── build COCO GT & run eval ──
+        categories = [
+            {'id': i + 1, 'name': self.class_names[i]}
+            for i in range(self.num_classes)
+        ]
+        coco_gt = {
+            'images': [
+                {'id': i, 'width': img_sizes[i][0], 'height': img_sizes[i][1]}
+                for i in sorted(img_sizes)
+            ],
+            'categories': categories,
+            'annotations': coco_annotations,
+        }
+
+        coco_eval = run_coco_bbox_eval(coco_gt, coco_predictions)
+        if coco_eval is None:
+            return None
+        return (coco_ap_at_iou50_all(coco_eval), coco_ap_at_iou50_95_all(coco_eval))
+
     # ── training loop ─────────────────────────────────────────────────
 
     def start_training(
@@ -192,6 +419,32 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             pin_memory=True,
         )
 
+        # ── resolve validation GT for training-time mAP evaluation ──
+        _val_labels_meta_dir, _val_coco_ann, _val_img_paths = self._resolve_val_map_paths(
+            data_yaml, val_img_dir,
+        )
+        _val_map_available = bool(
+            self._load_val_map_gt(_val_labels_meta_dir, _val_coco_ann)
+        ) and bool(_val_img_paths)
+        if not _val_map_available:
+            self.logger.warning(
+                "⚠️  未找到 val GT（labels_meta/val 或 val_coco_ann），"
+                "训练时将退化为按 val_loss 选 best 模型。"
+                " 检查: labels_meta=%s, coco_ann=%s",
+                _val_labels_meta_dir, _val_coco_ann,
+            )
+        else:
+            self.logger.info(
+                "✓ 训练期 mAP 评估可用, %d 张 val 图像 → best.pt 按 mAP@0.5:0.95 选择",
+                len(_val_img_paths),
+            )
+        val_map_freq = int(self.training_config.get('val_map_freq', 1))
+        val_map_max_images = int(self.training_config.get('val_map_max_images', 0))
+        self._val_labels_meta_dir = _val_labels_meta_dir
+        self._val_coco_ann_file = _val_coco_ann
+        self._val_img_paths = _val_img_paths
+        self._val_map_available = _val_map_available
+
         # resume（checkpoint 内 epoch 为「已成功结束的上一个 epoch 的 1-based 编号」，
         # 与保存时 epoch_loop+1 一致；下次训练从该值作为 0-based 下标开始）
         start_epoch = 0
@@ -222,6 +475,9 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         )
 
         best_val_loss = float("inf")
+        best_map_50: float = -1.0    # mAP@0.5
+        best_map_50_95: float = -1.0  # mAP@0.5:0.95 (primary criterion for best.pt)
+        best_map_epoch: int = 0
         results_rows: List[Dict[str, Any]] = []
         csv_path = self.log_dir / "results.csv"
         if resume_ckpt is not None and csv_path.exists():
@@ -235,9 +491,25 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
                     best_val_loss = float(
                         min(float(r["val/total_loss"]) for r in results_rows)
                     )
+                if "val/mAP_50" in prev.columns:
+                    map_vals = pd.to_numeric(
+                        prev["val/mAP_50"], errors="coerce"
+                    ).dropna()
+                    if not map_vals.empty:
+                        best_map_50 = float(map_vals.max())
+                if "val/mAP_50_95" in prev.columns:
+                    map95_vals = pd.to_numeric(
+                        prev["val/mAP_50_95"], errors="coerce"
+                    ).dropna()
+                    if not map95_vals.empty:
+                        best_map_50_95 = float(map95_vals.max())
+                        best_map_epoch = int(prev.loc[map95_vals.idxmax(), "epoch"])
+                elif best_map_50 >= 0:
+                    best_map_50_95 = best_map_50  # legacy CSV fallback
                 self.logger.info(
                     f"📈 已载入本地 results.csv 共 {len(results_rows)} 行, "
                     f"历史 best val_loss≈{best_val_loss:.4f}"
+                    f"{', best mAP@0.5:0.95≈%.4f' % best_map_50_95 if best_map_50_95 >= 0 else ''}"
                 )
             except Exception as exc:
                 self.logger.warning(f"读取已有 results.csv 失败（将从头记曲线）: {exc}")
@@ -276,6 +548,23 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
                     best_val_loss = float(resume_ckpt["best_val_loss"])
                 except (TypeError, ValueError):
                     pass
+            if "best_map" in resume_ckpt:
+                try:
+                    ck_map = float(resume_ckpt["best_map"])
+                    if ck_map > best_map_50:
+                        best_map_50 = ck_map
+                except (TypeError, ValueError):
+                    pass
+            if "best_map_50_95" in resume_ckpt:
+                try:
+                    ck_map95 = float(resume_ckpt["best_map_50_95"])
+                    if ck_map95 > best_map_50_95:
+                        best_map_50_95 = ck_map95
+                        best_map_epoch = int(resume_ckpt.get("best_map_epoch", 0))
+                except (TypeError, ValueError):
+                    pass
+            elif best_map_50 >= 0 and best_map_50_95 < 0:
+                best_map_50_95 = best_map_50  # legacy checkpoint fallback
 
         weights_dir = self.log_dir / "weights"
         weights_dir.mkdir(parents=True, exist_ok=True)
@@ -336,42 +625,129 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             self.logger.info(f"  计算验证集 loss ...")
             val_loss = self._validate_loss(model, val_loader, device)
 
+            # ── training-time mAP evaluation (every val_map_freq epochs) ──
+            val_map: Optional[Tuple[float, float]] = None
+            map_50 = float('nan')
+            map_50_95 = float('nan')
+            if (
+                _val_map_available
+                and val_map_freq > 0
+                and (epoch + 1) % val_map_freq == 0
+            ):
+                self.logger.info(f"  计算验证集 mAP@0.5 / mAP@0.5:0.95 ...")
+                val_map = self._compute_val_map(
+                    model, device, _val_img_paths,
+                    _val_labels_meta_dir, _val_coco_ann,
+                    max_eval_images=val_map_max_images,
+                )
+                if val_map is not None:
+                    map_50, map_50_95 = val_map
+            else:
+                val_map = None
+
             lr_now = optimizer.param_groups[0]["lr"]
-            self.logger.info(
-                f"Epoch {epoch + 1}/{epochs}  "
-                f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
-                f"lr={lr_now:.6f}  time={epoch_time:.1f}s"
-            )
+            log_parts = [
+                f"Epoch {epoch + 1}/{epochs}",
+                f"train_loss={train_loss:.4f}",
+                f"val_loss={val_loss:.4f}",
+            ]
+            if val_map is not None:
+                log_parts.append(f"mAP@0.5={map_50:.4f}")
+                log_parts.append(f"mAP@0.5:0.95={map_50_95:.4f}")
+            log_parts.append(f"lr={lr_now:.6f}")
+            log_parts.append(f"time={epoch_time:.1f}s")
+            self.logger.info("  ".join(log_parts))
 
             results_rows.append({
                 "epoch": epoch + 1,
                 "train/total_loss": train_loss,
                 "val/total_loss": val_loss,
+                "val/mAP_50": map_50,
+                "val/mAP_50_95": map_50_95,
                 "lr/pg0": lr_now,
             })
 
             # ── checkpointing ──
+            map50_95_improved = val_map is not None and map_50_95 > best_map_50_95
+            if map50_95_improved:
+                best_map_50_95 = map_50_95
+                best_map_50 = map_50
+                best_map_epoch = epoch + 1
+            if val_map is not None and map_50 > best_map_50:
+                best_map_50 = map_50  # track mAP@0.5 independently
+
+            loss_improved = val_loss < best_val_loss
+            if loss_improved:
+                best_val_loss = val_loss
+
+            # best.pt 判据：有 mAP 时**只**看 mAP@0.5:0.95；mAP 不可用时退回 val_loss
+            if val_map is not None:
+                best_is_new = map50_95_improved
+                best_reason = f"mAP@0.5:0.95={map_50_95:.4f}"
+            else:
+                best_is_new = loss_improved and not self._val_map_available
+                best_reason = f"val_loss={val_loss:.4f}, mAP 不可用"
+
             ckpt_payload = {
                 "epoch": epoch + 1,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "scheduler_state_dict": main_scheduler.state_dict(),
                 "best_val_loss": best_val_loss,
+                "best_map": best_map_50,
+                "best_map_50_95": best_map_50_95,
+                "best_map_epoch": best_map_epoch,
             }
             torch.save(ckpt_payload, weights_dir / "last.pt")
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if best_is_new:
                 torch.save(ckpt_payload, weights_dir / "best.pt")
-                self.logger.info(
-                    f"  ✓ Best model saved (val_loss={val_loss:.4f})"
-                )
+                self.logger.info(f"  ✓ Best model saved ({best_reason})")
+
+            # periodic checkpoint removed — only last.pt + best.pt are kept
 
         # ── write results.csv ──
         self._write_results_csv(results_rows)
 
-        # ── post-training (benchmark + COCO/scale eval) ──
+        # ── best.pt selection summary (verifiable audit trail) ──
         best_pt = weights_dir / "best.pt"
+        if best_pt.exists():
+            ck = torch.load(best_pt, map_location="cpu")
+            sel_epoch = int(ck.get("epoch", 0)) if isinstance(ck, dict) else 0
+            del ck
+            loss_epochs = [
+                (float(r["val/total_loss"]), int(r["epoch"]))
+                for r in results_rows
+                if r.get("val/total_loss") is not None
+            ]
+            loss_best_epoch = min(loss_epochs)[1] if loss_epochs else 0
+            criterion = "mAP@0.5:0.95" if best_map_50_95 >= 0 else "val_loss"
+            self.logger.info(
+                "🏁 best.pt 选择依据=%s → epoch %d (best mAP@0.5:0.95=%.4f, "
+                "mAP@0.5=%.4f @epoch %s; "
+                "val_loss 最优 epoch=%d，仅供参考)",
+                criterion, sel_epoch, best_map_50_95, best_map_50,
+                best_map_epoch or "-", loss_best_epoch,
+            )
+            (self.log_dir / "best_selection.json").write_text(
+                json.dumps({
+                    "criterion": criterion,
+                    "best_pt_epoch": sel_epoch,
+                    "best_map_50": best_map_50 if best_map_50 >= 0 else None,
+                    "best_map_50_95": best_map_50_95 if best_map_50_95 >= 0 else None,
+                    "best_map_epoch": best_map_epoch,
+                    "best_val_loss": best_val_loss,
+                    "val_loss_best_epoch": loss_best_epoch,
+                }, indent=2),
+                encoding="utf-8",
+            )
+            if best_map_50_95 >= 0 and best_map_epoch and sel_epoch != best_map_epoch:
+                self.logger.warning(
+                    "⚠️best.pt epoch(%d) 与 best mAP epoch(%d) 不一致，请检查",
+                    sel_epoch, best_map_epoch,
+                )
+
+        # ── post-training (benchmark + COCO/scale eval) ──
         if best_pt.exists():
             ckpt = torch.load(best_pt, map_location=device)
             state = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
@@ -448,6 +824,7 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        import numpy as np
 
         csv_path = self.log_dir / "results.csv"
         if not csv_path.exists():
@@ -456,7 +833,23 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             df = pd.read_csv(csv_path)
             epochs = df["epoch"].values
 
-            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+            has_map = (
+                "val/mAP_50" in df.columns and df["val/mAP_50_95"].notna().any()
+                if "val/mAP_50_95" in df.columns
+                else "val/mAP_50" in df.columns and df["val/mAP_50"].notna().any()
+            )
+            has_map95 = "val/mAP_50_95" in df.columns and df["val/mAP_50_95"].notna().any()
+            if has_map95:
+                fig, axes = plt.subplots(1, 4, figsize=(27, 5))
+            elif has_map:
+                fig, axes = plt.subplots(1, 3, figsize=(21, 5))
+            else:
+                fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+                axes = [axes[0], axes[1], None, None]
+            if not has_map95 and has_map:
+                axes = [axes[0], axes[1], None, axes[2]]
+            if not has_map and not has_map95:
+                axes = [axes[0], None, None, axes[1]]
             fig.suptitle("Faster R-CNN Training Curves", fontsize=16, fontweight="bold")
 
             if "train/total_loss" in df.columns:
@@ -469,13 +862,64 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
             axes[0].legend()
             axes[0].grid(True, alpha=0.3)
 
-            if "lr/pg0" in df.columns:
-                axes[1].plot(epochs, df["lr/pg0"], color="orange", linewidth=2)
-                axes[1].set_yscale("log")
-            axes[1].set_xlabel("Epoch")
-            axes[1].set_ylabel("Learning Rate")
-            axes[1].set_title("Learning Rate Schedule")
-            axes[1].grid(True, alpha=0.3)
+            # mAP@0.5 curve (axes[1])
+            map50_ax = axes[1] if has_map else None
+            if map50_ax is not None:
+                map_vals = pd.to_numeric(df["val/mAP_50"], errors='coerce')
+                valid = map_vals.notna()
+                if valid.any():
+                    map50_ax.plot(
+                        epochs[valid], map_vals[valid].values,
+                        "g-^", label="mAP@0.5", linewidth=2, markersize=4,
+                    )
+                    best_idx = map_vals[valid].idxmax()
+                    best_ep = int(df.loc[best_idx, "epoch"])
+                    best_val = map_vals.loc[best_idx]
+                    map50_ax.annotate(
+                        f'E{best_ep}\n{best_val:.3f}',
+                        xy=(best_ep, best_val), fontsize=8, fontweight='bold',
+                        color='darkgreen',
+                    )
+                map50_ax.set_xlabel("Epoch")
+                map50_ax.set_ylabel("mAP@0.5")
+                map50_ax.set_title("Validation mAP@0.5")
+                map50_ax.legend()
+                map50_ax.grid(True, alpha=0.3)
+
+            # mAP@0.5:0.95 curve (axes[2]) — primary criterion
+            map95_ax = axes[2] if has_map95 else None
+            if map95_ax is not None:
+                map95_vals = pd.to_numeric(df["val/mAP_50_95"], errors='coerce')
+                valid95 = map95_vals.notna()
+                if valid95.any():
+                    map95_ax.plot(
+                        epochs[valid95], map95_vals[valid95].values,
+                        "m-D", label="mAP@0.5:0.95", linewidth=2, markersize=4,
+                    )
+                    best95_idx = map95_vals[valid95].idxmax()
+                    best95_ep = int(df.loc[best95_idx, "epoch"])
+                    best95_val = map95_vals.loc[best95_idx]
+                    map95_ax.annotate(
+                        f'E{best95_ep}\n{best95_val:.3f}',
+                        xy=(best95_ep, best95_val), fontsize=8, fontweight='bold',
+                        color='purple',
+                    )
+                map95_ax.set_xlabel("Epoch")
+                map95_ax.set_ylabel("mAP@0.5:0.95")
+                map95_ax.set_title("Validation mAP@0.5:0.95")
+                map95_ax.legend()
+                map95_ax.grid(True, alpha=0.3)
+
+            # LR curve (always in the last subplot)
+            lr_ax = axes[3] if len(axes) > 3 else axes[-1]
+            if lr_ax is not None:
+                if "lr/pg0" in df.columns:
+                    lr_ax.plot(epochs, df["lr/pg0"], color="orange", linewidth=2)
+                    lr_ax.set_yscale("log")
+                lr_ax.set_xlabel("Epoch")
+                lr_ax.set_ylabel("Learning Rate")
+                lr_ax.set_title("Learning Rate Schedule")
+                lr_ax.grid(True, alpha=0.3)
 
             plt.tight_layout()
             save_path = self.log_dir / "training_curves.png"

@@ -44,6 +44,18 @@ def coco_ap_at_iou50_all(coco_eval) -> float:
     return max(0.0, float(coco_eval.stats[1]))
 
 
+def coco_ap_at_iou50_95_all(coco_eval) -> float:
+    """
+    主 AP@IoU=0.50:0.95（COCOeval.stats[0]）。
+
+    COCOeval 约定：当评估集中无正样本 GT 时，stats[0] 返回 -1。
+    此处统一 clamp 为 0.0。
+    """
+    if coco_eval is None or not hasattr(coco_eval, "stats") or len(coco_eval.stats) < 1:
+        return 0.0
+    return max(0.0, float(coco_eval.stats[0]))
+
+
 def coco_area_ap_at_iou50(coco_eval) -> Tuple[float, float, float]:
     """
     按 COCO 面积划分（small/medium/large）在 IoU=0.50 下的 AP 均值（与 YOLO 多尺度 mAP@0.5 口径对齐）。

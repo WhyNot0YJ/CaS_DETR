@@ -801,7 +801,11 @@ class BaseYOLOTrainer(ABC):
                         weather_names.append(weather)
         weather_names = sorted(weather_names)
         weather_buckets = [_weather_metric_key(weather) for weather in weather_names]
-        summary_csv = result_csv('eval_metrics')
+        summary_csv = (
+            result_csv('eval_metrics')
+            if hierarchical_eval
+            else result_csv('fine_grained_eval_metrics')
+        )
         last_metrics: Dict[str, Any] = {}
 
         if True:
@@ -1034,11 +1038,11 @@ class BaseYOLOTrainer(ABC):
                     fine_coco_gt = {
                         'images': [
                             {
-                                'id': i,
-                                'width': img_sizes[i][0],
-                                'height': img_sizes[i][1],
+                                'id': image_id,
+                                'width': w,
+                                'height': h,
                             }
-                            for i in range(len(eval_images))
+                            for image_id, (w, h) in img_sizes.items()
                         ],
                         'categories': fine_categories_coco,
                         'annotations': coco_annotations,
