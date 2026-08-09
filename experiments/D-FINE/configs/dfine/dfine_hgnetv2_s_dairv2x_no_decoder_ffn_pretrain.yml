@@ -1,0 +1,31 @@
+# Fair D-FINE baseline: keep pretrained decoder attention and remove only dense FFN weights.
+# This matches the historical CaS-DETR runs where MoE FFN parameters were randomly initialized.
+__include__: [
+  './dfine_hgnetv2_s_coco.yml',
+  '../dataset/dairv2x_detection.yml',
+]
+
+output_dir: ./outputs/dfine_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain
+
+tuning: pretrained/dfine_s_coco_no_decoder_ffn.pth
+
+epochs: 100
+
+train_dataloader:
+  # Physical batch 8 avoids OOM on an 8 GB GPU.
+  total_batch_size: 8
+  num_workers: 4
+  pin_memory: False
+  dataset:
+    transforms:
+      policy:
+        epoch: 88
+  collate_fn:
+    stop_epoch: 88
+    scale_low_ratio: 0.75
+    scale_high_ratio: 1.25
+
+val_dataloader:
+  total_batch_size: 8
+  num_workers: 4
+  pin_memory: False
