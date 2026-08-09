@@ -1658,7 +1658,7 @@ run_single_experiment() {
         local model_output_rel
         model_output_rel=$("$PYTHON_BIN" -c \
             'import sys; sys.path.insert(0, sys.argv[1]); from common.dataset_protocol import protocol_output_dir; print(protocol_output_dir(sys.argv[2], sys.argv[3]))' \
-            "$SCRIPT_DIR" "$config_path" "$experiment_protocol")
+            "$SCRIPT_DIR" "$yml_rel" "$experiment_protocol")
         if [ -n "$model_output_rel" ] && [ -f "$model_output_rel/last.pth" ]; then
             resume_arg="-r $model_output_rel/last.pth"
             pretrained_arg=""
