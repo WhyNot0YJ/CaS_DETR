@@ -1,5 +1,5 @@
 # Fair RT-DETR baseline: keep pretrained decoder attention and remove only dense FFN weights.
-# The physical train batch is 8 to fit the 8 GB GPU; keep this setting when comparing runs.
+# Keep the original RT-DETR batch-size protocol for a direct baseline comparison.
 __include__: [
   '../dataset/dairv2x_detection.yml',
   '../runtime.yml',
@@ -35,8 +35,8 @@ optimizer:
       weight_decay: 0.
 
 train_dataloader:
-  total_batch_size: 8
-  num_workers: 4
+  total_batch_size: 16
+  num_workers: 8
   pin_memory: False
   dataset:
     transforms:
@@ -46,6 +46,6 @@ train_dataloader:
     stop_epoch: 59
 
 val_dataloader:
-  total_batch_size: 8
-  num_workers: 4
+  total_batch_size: 32
+  num_workers: 8
   pin_memory: False

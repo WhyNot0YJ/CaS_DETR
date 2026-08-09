@@ -15,9 +15,8 @@ no_aug_epoch: 12
 warmup_iter: 500
 
 train_dataloader:
-  # Physical batch 8 avoids OOM for the dense decoder FFN on an 8 GB GPU.
-  total_batch_size: 8
-  num_workers: 4
+  total_batch_size: 16
+  num_workers: 8
   pin_memory: False
   dataset:
     transforms:
@@ -30,6 +29,6 @@ train_dataloader:
     scale_high_ratio: 1.25
 
 val_dataloader:
-  total_batch_size: 8
-  num_workers: 4
+  total_batch_size: 64
+  num_workers: 8
   pin_memory: False
