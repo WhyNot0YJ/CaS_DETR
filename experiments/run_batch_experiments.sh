@@ -51,7 +51,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --yes --test --yolo --m --dairv2x  # 测试模式仅 DAIR 的 m 规模 YOLO 全家桶
 #   ./run_batch_experiments.sh --fasterrcnn                    # 只运行 torchvision Faster R-CNN（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）
-#   ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR，仅移除 decoder FFN 预训练参数
+#   ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数
 #   ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2，等价 --rtdetrv2
 #   ./run_batch_experiments.sh --test --rtdetrv2               # 测试模式只跑官方 RT-DETRv2（2 epoch + cas-eval）
@@ -561,6 +561,7 @@ declare -A DEIM_CONFIGS=(
 declare -A FAIR_BASELINE_CONFIGS=(
     ["deim-s-no-decoder-ffn-dairv2x"]="DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain.yml"
     ["rtdetrv2-r18-no-decoder-ffn-dairv2x"]="RT-DETR/rtdetrv2_pytorch/configs/rtdetrv2/rtdetrv2_r18vd_100e_dairv2x_no_decoder_ffn_pretrain.yml@dairv2x"
+    ["dfine-s-no-decoder-ffn-dairv2x"]="D-FINE/configs/dfine/dfine_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain.yml"
 )
 
 declare -A DFINE_CONFIGS=(
@@ -1393,7 +1394,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --yolo --n --dairv2x            # 仅 DAIR 的 n 规模"
         echo "  ./run_batch_experiments.sh --fasterrcnn                    # 只运行 torchvision Faster R-CNN"
         echo "  ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）"
-        echo "  ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR，仅移除 decoder FFN 预训练参数"
+        echo "  ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数"
         echo "  ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）"
         echo "  ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验"
