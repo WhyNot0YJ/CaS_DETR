@@ -51,6 +51,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --yes --test --yolo --m --dairv2x  # 测试模式仅 DAIR 的 m 规模 YOLO 全家桶
 #   ./run_batch_experiments.sh --fasterrcnn                    # 只运行 torchvision Faster R-CNN（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）
+#   ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR，仅移除 decoder FFN 预训练参数
 #   ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2，等价 --rtdetrv2
 #   ./run_batch_experiments.sh --test --rtdetrv2               # 测试模式只跑官方 RT-DETRv2（2 epoch + cas-eval）
@@ -332,6 +333,9 @@ apply_default_protocols_to_configs() {
                     continue
                 fi
                 ;;
+            RT-DETR/rtdetrv2_pytorch/*no_decoder_ffn_pretrain.yml@*)
+                target="$p"
+                ;;
             RT-DETR/rtdetrv2_pytorch/*)
                 target="RT-DETR/rtdetrv2_pytorch/configs/rtdetrv2/rtdetrv2_r18vd_100e_dairv2x.yml@dairv2x_vehicle5"
                 ;;
@@ -554,6 +558,11 @@ declare -A DEIM_CONFIGS=(
     ["deim-s-uadetrac"]="DEIM/configs/deim_dfine/deim_hgnetv2_s_uadetrac.yml"
 )
 
+declare -A FAIR_BASELINE_CONFIGS=(
+    ["deim-s-no-decoder-ffn-dairv2x"]="DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain.yml"
+    ["rtdetrv2-r18-no-decoder-ffn-dairv2x"]="RT-DETR/rtdetrv2_pytorch/configs/rtdetrv2/rtdetrv2_r18vd_100e_dairv2x_no_decoder_ffn_pretrain.yml@dairv2x"
+)
+
 declare -A DFINE_CONFIGS=(
     ["dfine-s-dairv2x"]="D-FINE/configs/dfine/dfine_hgnetv2_s_dairv2x.yml"
     ["dfine-s-uadetrac"]="D-FINE/configs/dfine/dfine_hgnetv2_s_uadetrac.yml"
@@ -652,6 +661,16 @@ build_all_configs() {
         all_configs_paths+=("$p")
         local b
         _config_stem=$(basename "$p")
+        b="${_config_stem%.yaml}"
+        b="${b%.yml}"
+        NAME_TO_PATH["$key"]="$p"
+        NAME_TO_PATH["$b"]="$p"
+    done
+    for key in "${!FAIR_BASELINE_CONFIGS[@]}"; do
+        local p="${FAIR_BASELINE_CONFIGS[$key]}"
+        all_configs_paths+=("$p")
+        local b
+        _config_stem=$(basename "${p%%@*}")
         b="${_config_stem%.yaml}"
         b="${b%.yml}"
         NAME_TO_PATH["$key"]="$p"
@@ -987,6 +1006,7 @@ parse_arguments() {
     local has_yolox=false
     local has_fasterrcnn=false
     local has_deim=false
+    local has_fair_baselines=false
     local has_dfine=false
     
     for arg in "$@"; do
@@ -1058,6 +1078,9 @@ parse_arguments() {
             --deim)
                 has_deim=true
                 ;;
+            --fair-baselines|--fair-baseline)
+                has_fair_baselines=true
+                ;;
             --dfine|--d-fine)
                 has_dfine=true
                 ;;
@@ -1065,7 +1088,7 @@ parse_arguments() {
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_dynamic_base" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_cas_token_policy_test" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_dynamic_base" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_cas_token_policy_test" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_fair_baselines" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
@@ -1087,6 +1110,7 @@ parse_arguments() {
         [ "$has_yolox" = true ] && selected_types+=("YOLOX")
         [ "$has_fasterrcnn" = true ] && selected_types+=("FasterRCNN")
         [ "$has_deim" = true ] && selected_types+=("DEIM")
+        [ "$has_fair_baselines" = true ] && selected_types+=("FairBaselines")
         [ "$has_dfine" = true ] && selected_types+=("D-FINE")
         local types_str=$(IFS='+'; echo "${selected_types[*]}")
         if [ "$has_test" = true ]; then
@@ -1214,6 +1238,13 @@ parse_arguments() {
         if [ "$has_deim" = true ]; then
             for key in $(printf '%s\n' "${!DEIM_CONFIGS[@]}" | sort); do
                 local p="${DEIM_CONFIGS[$key]}"
+                CONFIGS_TO_RUN+=("$p")
+            done
+        fi
+
+        if [ "$has_fair_baselines" = true ]; then
+            for key in $(printf '%s\n' "${!FAIR_BASELINE_CONFIGS[@]}" | sort); do
+                local p="${FAIR_BASELINE_CONFIGS[$key]}"
                 CONFIGS_TO_RUN+=("$p")
             done
         fi
@@ -1362,6 +1393,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --yolo --n --dairv2x            # 仅 DAIR 的 n 规模"
         echo "  ./run_batch_experiments.sh --fasterrcnn                    # 只运行 torchvision Faster R-CNN"
         echo "  ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）"
+        echo "  ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR，仅移除 decoder FFN 预训练参数"
         echo "  ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）"
         echo "  ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验"
@@ -1625,7 +1657,7 @@ run_single_experiment() {
         local model_output_rel
         model_output_rel=$("$PYTHON_BIN" -c \
             'import sys; sys.path.insert(0, sys.argv[1]); from common.dataset_protocol import protocol_output_dir; print(protocol_output_dir(sys.argv[2], sys.argv[3]))' \
-            "$SCRIPT_DIR" "$yml_rel" "$experiment_protocol")
+            "$SCRIPT_DIR" "$config_path" "$experiment_protocol")
         if [ -n "$model_output_rel" ] && [ -f "$model_output_rel/last.pth" ]; then
             resume_arg="-r $model_output_rel/last.pth"
             pretrained_arg=""

@@ -1,0 +1,35 @@
+# Fair DEIM baseline: keep pretrained decoder attention and remove only dense FFN weights.
+# This matches the historical CaS-DETR runs where MoE FFN parameters were random.
+__include__: [
+  './deim_hgnetv2_s_coco.yml',
+  '../dataset/dairv2x_detection.yml',
+]
+
+output_dir: ./outputs/deim_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain
+
+tuning: pretrained/deim_dfine_hgnetv2_s_coco_120e_no_decoder_ffn.pth
+
+epoches: 100
+flat_epoch: 48
+no_aug_epoch: 12
+warmup_iter: 500
+
+train_dataloader:
+  # Physical batch 8 avoids OOM for the dense decoder FFN on an 8 GB GPU.
+  total_batch_size: 8
+  num_workers: 4
+  pin_memory: False
+  dataset:
+    transforms:
+      policy:
+        epoch: [4, 48, 88]
+  collate_fn:
+    mixup_epochs: [4, 48]
+    stop_epoch: 88
+    scale_low_ratio: 0.75
+    scale_high_ratio: 1.25
+
+val_dataloader:
+  total_batch_size: 8
+  num_workers: 4
+  pin_memory: False
