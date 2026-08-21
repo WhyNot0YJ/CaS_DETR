@@ -51,6 +51,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数
 #   ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）
+#   ./run_batch_experiments.sh --main                          # 当前主实验：RT-DETR + D-FINE + DEIM + CaS MoE4-1x（两协议）
 #   ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2，等价 --rtdetrv2
 #   ./run_batch_experiments.sh --test --rtdetrv2               # 测试模式只跑官方 RT-DETRv2（2 epoch + cas-eval）
 #   ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验（2 epoch smoke test）
@@ -484,6 +485,18 @@ declare -A DFINE_CONFIGS=(
     ["dfine-s-uadetrac"]="D-FINE/configs/dfine/dfine_hgnetv2_s_uadetrac_no_decoder_ffn_pretrain.yml"
 )
 
+# 当前主实验：4 个模型 × DAIR-V2X / UA-DETRAC。
+declare -a CURRENT_MAIN_EXPERIMENTS=(
+    "${RTDETRV2_ADAPTER_CONFIGS[rtdetrv2-r18-dairv2x]}"
+    "${RTDETRV2_ADAPTER_CONFIGS[rtdetrv2-r18-uadetrac]}"
+    "${DFINE_CONFIGS[dfine-s-dairv2x]}"
+    "${DFINE_CONFIGS[dfine-s-uadetrac]}"
+    "${DEIM_CONFIGS[deim-s-dairv2x]}"
+    "${DEIM_CONFIGS[deim-s-uadetrac]}"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_uadetrac.yml"
+)
+
 # 构建全部配置列表与名称映射
 all_configs_paths=()
 declare -A NAME_TO_PATH
@@ -675,6 +688,7 @@ parse_arguments() {
     # 首先检查特殊标志（--test 和 backbone选择）
     local args=("$@")
     local has_test=false
+    local has_main=false
     local has_r18=false
     local has_n=false
     local has_s=false
@@ -699,6 +713,11 @@ parse_arguments() {
         if [ "$arg" == "--test" ]; then
             has_test=true
             TEST_MODE=true
+            idx=$((idx + 1))
+            continue
+        fi
+        if [ "$arg" == "--main" ]; then
+            has_main=true
             idx=$((idx + 1))
             continue
         fi
@@ -770,7 +789,12 @@ parse_arguments() {
     done
 
     if [ "$SCOPE_DAIRV2X" != true ] && [ "$SCOPE_UADETRAC" != true ]; then
-        SCOPE_DAIRV2X=true
+        if [ "$has_main" = true ]; then
+            SCOPE_DAIRV2X=true
+            SCOPE_UADETRAC=true
+        else
+            SCOPE_DAIRV2X=true
+        fi
     fi
     if [ "$SCOPE_DAIRV2X" = true ]; then
         log_info "数据集协议: dairv2x"
@@ -951,9 +975,10 @@ parse_arguments() {
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_dynamic_base" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_fair_baselines" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_main" = true ] || [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_dynamic_base" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_fair_baselines" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
+        [ "$has_main" = true ] && selected_types+=("CurrentMain")
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
         [ "$has_cas_main" = true ] && selected_types+=("CaS_Main")
         [ "$has_cas_components" = true ] && selected_types+=("CaS_ComponentAblation")
@@ -982,6 +1007,10 @@ parse_arguments() {
         fi
         
         # 根据指定的类型添加配置
+        if [ "$has_main" = true ]; then
+            append_cas_group "${CURRENT_MAIN_EXPERIMENTS[@]}"
+        fi
+
         if [ "$has_rtdetrv2" = true ]; then
             for key in $(printf '%s\n' "${!RTDETRV2_ADAPTER_CONFIGS[@]}" | sort); do
                 local p="${RTDETRV2_ADAPTER_CONFIGS[$key]}"
@@ -1252,6 +1281,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）"
         echo "  ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数"
         echo "  ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）"
+        echo "  ./run_batch_experiments.sh --main                          # 当前主实验：RT-DETR + D-FINE + DEIM + CaS MoE4-1x（两协议）"
         echo "  ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验"
         echo "  ./run_batch_experiments.sh --test --dqm_detr               # 测试模式：DQM 全部消融+主实验"
