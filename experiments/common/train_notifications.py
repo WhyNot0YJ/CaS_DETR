@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 
-DEFAULT_RECIPIENT = "13761990472@163.com"
+DEFAULT_RECIPIENT = "yujie8580@gmail.com"
 RESEND_EMAIL_ENDPOINT = "https://api.resend.com/emails"
 METRIC_LABELS = (
     ("map50", "mAP@0.50"),
