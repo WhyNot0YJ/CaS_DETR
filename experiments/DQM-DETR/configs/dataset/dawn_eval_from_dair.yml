@@ -6,7 +6,7 @@
 #
 # __include__: later overrides earlier.
 #   1. deim_hgnetv2_s_dairv2x.yml supplies model + DAIR train/val dataloaders.
-#      Vehicle5 is the project default; pass --dairv2x-vehicle8 for this 8-class DAWN
+#      DAIR-V2X is the eight-class project protocol.
 #      cross-domain evaluation.
 #   2. dawn_detection.yml then replaces evaluator (cross_domain_label_map) and
 #      val_dataloader (full DAWN train+val) -- train_dataloader remains DAIR's,

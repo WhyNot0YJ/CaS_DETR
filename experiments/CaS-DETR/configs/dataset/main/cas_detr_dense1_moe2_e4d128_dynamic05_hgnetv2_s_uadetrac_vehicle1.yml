@@ -1,9 +1,0 @@
-__include__: [
-  '../../deim_dfine/deim_hgnetv2_s_uadetrac.yml',
-  '../../base/cas_detr_dense1_moe2_e4d128.yml'
-]
-
-output_dir: ./outputs/main/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_uadetrac
-
-HybridEncoder:
-  token_keep_ratio: 0.5

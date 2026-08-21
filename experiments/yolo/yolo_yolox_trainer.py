@@ -63,6 +63,8 @@ class YOLOXTrainer(BaseYOLOTrainer):
         if "num_workers" in self.misc_config:
             exp.data_num_workers = int(self.misc_config["num_workers"])
         exp.max_epoch = int(self.training_config["epochs"])
+        if "no_aug_epochs" in self.training_config:
+            exp.no_aug_epochs = int(self.training_config["no_aug_epochs"])
         exp.eval_interval = 1
         exp.print_interval = min(50, max(10, exp.max_epoch))
         exp.save_history_ckpt = False

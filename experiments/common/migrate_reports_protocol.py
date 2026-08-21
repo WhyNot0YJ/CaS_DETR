@@ -14,14 +14,8 @@ CSV_NAMES = ("results.csv", "eval_metrics.csv", "benchmark.csv")
 def row_protocol(row: dict[str, str]) -> str:
     dataset = str(row.get("dataset", "")).lower()
     if "uadetrac" in dataset or "ua-detrac" in dataset or dataset == "data":
-        return (
-            "uadetrac_vehicle1"
-            if "vehicle1" in dataset
-            else "uadetrac_vehicle4"
-        )
-    if "vehicle5" in dataset:
-        return "dairv2x_vehicle5"
-    return "dairv2x_vehicle8"
+        return "uadetrac"
+    return "dairv2x"
 
 
 def migrate_csv(path: Path) -> None:
@@ -49,7 +43,7 @@ def main() -> None:
         migrate_csv(REPORTS / name)
     legacy_plot = REPORTS / "results.png"
     if legacy_plot.is_file():
-        target = REPORTS / "dairv2x_vehicle8" / legacy_plot.name
+        target = REPORTS / "dairv2x" / legacy_plot.name
         target.parent.mkdir(parents=True, exist_ok=True)
         legacy_plot.replace(target)
 

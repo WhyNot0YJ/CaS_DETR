@@ -1,6 +1,0 @@
-__include__: [
-  './deim_hgnetv2_s_dairv2x.yml',
-  '../dataset/dairv2x_vehicle5_detection.yml',
-]
-
-output_dir: ./outputs/deim_hgnetv2_s_dairv2x_vehicle5

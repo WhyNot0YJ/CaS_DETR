@@ -1,0 +1,27 @@
+# Fair D-FINE baseline: keep pretrained decoder attention and remove only dense FFN weights.
+__include__: [
+  './dfine_hgnetv2_s_coco.yml',
+  '../dataset/uadetrac_detection.yml',
+]
+
+output_dir: ./outputs/dfine_hgnetv2_s_uadetrac_no_decoder_ffn_pretrain
+
+tuning: pretrained/dfine_s_coco_no_decoder_ffn.pth
+
+epochs: 132
+
+train_dataloader:
+  total_batch_size: 16
+  num_workers: 12
+  dataset:
+    transforms:
+      policy:
+        epoch: 120
+  collate_fn:
+    stop_epoch: 120
+    scale_low_ratio: 0.75
+    scale_high_ratio: 1.25
+
+val_dataloader:
+  total_batch_size: 64
+  num_workers: 12

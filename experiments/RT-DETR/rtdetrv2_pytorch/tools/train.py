@@ -6,12 +6,19 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 import argparse
+from pathlib import Path
+
+_EXP_ROOT = str(Path(__file__).resolve().parents[3])
+if _EXP_ROOT not in sys.path:
+    sys.path.insert(0, _EXP_ROOT)
 
 from src.misc import dist_utils
 from src.core import YAMLConfig, yaml_utils
 from src.solver import TASKS
+from common.train_notifications import notify_training_entry
 
 
+@notify_training_entry("RT-DETRv2")
 def main(args, ) -> None:
     """main
     """
@@ -35,6 +42,7 @@ def main(args, ) -> None:
         solver.fit()
 
     dist_utils.cleanup()
+    return {"output_dir": str(cfg.output_dir)}
     
 
 if __name__ == '__main__':

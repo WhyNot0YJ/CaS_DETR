@@ -4,7 +4,7 @@ evaluator:
   type: CocoEvaluatorTrainLabelMapping
   iou_types: ['bbox']
 
-num_classes: 1
+num_classes: 4
 remap_mscoco_category: False
 
 vis_after_train: true
@@ -15,8 +15,8 @@ train_dataloader:
   type: DataLoader
   dataset:
     type: CocoDetection
-    img_folder: /root/autodl-fs/datasets/UA-DETRAC-Vehicle1/train
-    ann_file: /root/autodl-fs/datasets/UA-DETRAC-Vehicle1/annotations/instances_train.json
+    img_folder: /root/autodl-fs/datasets/UA-DETRAC_COCO/train
+    ann_file: /root/autodl-fs/datasets/UA-DETRAC_COCO/annotations/instances_train.json
     return_masks: False
   shuffle: True
   num_workers: 8
@@ -28,8 +28,8 @@ val_dataloader:
   type: DataLoader
   dataset:
     type: CocoDetection
-    img_folder: /root/autodl-fs/datasets/UA-DETRAC-Vehicle1/val
-    ann_file: /root/autodl-fs/datasets/UA-DETRAC-Vehicle1/annotations/instances_val.json
+    img_folder: /root/autodl-fs/datasets/UA-DETRAC_COCO/val
+    ann_file: /root/autodl-fs/datasets/UA-DETRAC_COCO/annotations/instances_val.json
     return_masks: False
   shuffle: False
   num_workers: 8

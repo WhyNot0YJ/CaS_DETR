@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YOLOX-M on the default DAIR-V2X Vehicle5 protocol."""
+"""YOLOX-M on the native DAIR-V2X protocol."""
 
 import os
 

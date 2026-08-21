@@ -13,10 +13,7 @@ if str(_experiments_root) not in sys.path:
     sys.path.insert(0, str(_experiments_root))
 
 _yolo_dir = Path(__file__).resolve().parent
-_external = _yolo_dir / "external"
-if _external.is_dir() and str(_external) not in sys.path:
-    sys.path.insert(0, str(_external))
-_yolox_repo = _external / "YOLOX"
+_yolox_repo = _yolo_dir / "external" / "YOLOX"
 if _yolox_repo.is_dir() and str(_yolox_repo) not in sys.path:
     sys.path.insert(0, str(_yolox_repo))
 
@@ -27,6 +24,7 @@ from common.dataset_registry import (
     apply_yolo_dataset_profile as apply_dataset_profile,
 )
 from common.dataset_protocol import set_report_protocol
+from common.train_notifications import notify_training_entry
 
 DEFAULT_CLASS_NAMES: List[str] = []
 
@@ -71,14 +69,10 @@ def build_trainer(version: str, config: dict, config_path: Optional[str] = None,
 
 def find_latest_checkpoint(log_base: str, config: dict) -> Optional[str]:
     data_yaml = str(config.get("data", {}).get("data_yaml", "")).lower()
-    if "vehicle5" in data_yaml:
-        dataset_dir = "dairv2x_vehicle5"
-    elif "dair" in data_yaml:
-        dataset_dir = "dairv2x_vehicle8"
-    elif "vehicle1" in data_yaml:
-        dataset_dir = "uadetrac_vehicle1"
+    if "dair" in data_yaml:
+        dataset_dir = "dairv2x"
     elif "uadetrac" in data_yaml or "ua-detrac" in data_yaml:
-        dataset_dir = "uadetrac_vehicle4"
+        dataset_dir = "uadetrac"
     else:
         dataset_dir = Path(data_yaml).stem
     log_dir = _yolo_dir / log_base / dataset_dir
@@ -90,16 +84,15 @@ def find_latest_checkpoint(log_base: str, config: dict) -> Optional[str]:
     return str(max(checkpoints, key=lambda path: path.stat().st_mtime))
 
 
+@notify_training_entry("YOLO")
 def main():
     parser = argparse.ArgumentParser(description="统一YOLO训练入口")
     parser.add_argument("--version", type=str, required=True, help="YOLO版本: v5/v8/v12")
     parser.add_argument("--config", type=str, default=None, help="YAML配置文件路径")
     parser.add_argument("--dataset", type=str, default=None, help="数据集键名或别名（在 configs/datasets.yaml 中定义）")
     protocol = parser.add_mutually_exclusive_group()
-    protocol.add_argument("--dairv2x-vehicle5", action="store_true")
-    protocol.add_argument("--dairv2x-vehicle8", action="store_true")
-    protocol.add_argument("--uadetrac-vehicle1", action="store_true")
-    protocol.add_argument("--uadetrac-vehicle4", action="store_true")
+    protocol.add_argument("--dairv2x", action="store_true")
+    protocol.add_argument("--uadetrac", action="store_true")
     parser.add_argument("--dataset_registry", type=str, default="configs/datasets.yaml", help="数据集注册表路径")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None, help="从指定检查点恢复")
     parser.add_argument("--resume", action="store_true", help="自动从最新检查点恢复")
@@ -117,14 +110,10 @@ def main():
 
     selected_class_names = DEFAULT_CLASS_NAMES
     datasets = load_dataset_registry(Path(args.dataset_registry))
-    if args.dairv2x_vehicle5:
-        args.dataset = "dairv2x_vehicle5"
-    elif args.dairv2x_vehicle8:
-        args.dataset = "dairv2x_vehicle8"
-    elif args.uadetrac_vehicle1:
-        args.dataset = "uadetrac_vehicle1"
-    elif args.uadetrac_vehicle4:
-        args.dataset = "uadetrac_vehicle4"
+    if args.dairv2x:
+        args.dataset = "dairv2x"
+    elif args.uadetrac:
+        args.dataset = "uadetrac"
 
     if args.dataset:
         profile = resolve_dataset_profile(datasets, args.dataset)
@@ -142,7 +131,7 @@ def main():
             if isinstance(profile_classes, list) and profile_classes:
                 selected_class_names = [str(name) for name in profile_classes]
     if profile:
-        set_report_protocol(str(profile.get("report_protocol", "dairv2x_vehicle5")))
+        set_report_protocol(str(profile.get("report_protocol", "dairv2x")))
 
     if args.resume and not args.resume_from_checkpoint:
         log_base = config.get("checkpoint", {}).get("log_dir", "logs")
@@ -170,6 +159,7 @@ def main():
         epochs_override=args.epochs,
     )
     trainer.run_tensorrt_benchmark()
+    return {"output_dir": str(trainer.log_dir)}
 
 
 if __name__ == "__main__":

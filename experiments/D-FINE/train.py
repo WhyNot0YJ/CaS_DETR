@@ -20,6 +20,7 @@ from src.misc import dist_utils
 from src.solver import TASKS
 from common.dataset_protocol import apply_detr_protocol_overrides
 from pprint import pprint
+from common.train_notifications import notify_training_entry
 
 debug = False
 
@@ -59,6 +60,7 @@ def safe_get_rank():
         return 0
 
 
+@notify_training_entry("D-FINE")
 def main(args) -> None:
     """main"""
     dist_utils.setup_distributed(args.print_rank, args.print_method, seed=args.seed)
@@ -103,6 +105,7 @@ def main(args) -> None:
         solver.fit()
 
     dist_utils.cleanup()
+    return {"output_dir": str(cfg.output_dir)}
 
 
 if __name__ == "__main__":
@@ -127,10 +130,8 @@ if __name__ == "__main__":
         default=False,
     )
     protocol = parser.add_mutually_exclusive_group()
-    protocol.add_argument("--dairv2x-vehicle5", dest="dataset_protocol", action="store_const", const="dairv2x_vehicle5")
-    protocol.add_argument("--dairv2x-vehicle8", dest="dataset_protocol", action="store_const", const="dairv2x_vehicle8")
-    protocol.add_argument("--uadetrac-vehicle1", dest="dataset_protocol", action="store_const", const="uadetrac_vehicle1")
-    protocol.add_argument("--uadetrac-vehicle4", dest="dataset_protocol", action="store_const", const="uadetrac_vehicle4")
+    protocol.add_argument("--dairv2x", dest="dataset_protocol", action="store_const", const="dairv2x")
+    protocol.add_argument("--uadetrac", dest="dataset_protocol", action="store_const", const="uadetrac")
 
     # priority 1
     parser.add_argument("-u", "--update", nargs="+", help="update yaml config")

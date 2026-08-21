@@ -16,7 +16,7 @@ def reports_dir() -> Path:
     if override:
         return Path(override).expanduser()
     protocol = os.environ.get(
-        "EXPERIMENT_DATASET_PROTOCOL", "dairv2x_vehicle5"
+        "EXPERIMENT_DATASET_PROTOCOL", "dairv2x"
     ).lower()
     return EXPERIMENTS_DIR / "reports" / protocol
 

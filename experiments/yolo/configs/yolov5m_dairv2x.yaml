@@ -3,11 +3,12 @@ model:
   pretrained_weights: "pretrained/yolov5m.pt"
 
 training:
-  epochs: 100
+  epochs: 132
+  close_mosaic: 32
   batch_size: 8
 
 data:
-  data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO_Vehicle5/dairv2x_vehicle5.yaml"
+  data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO/dairv2x.yaml"
 
 checkpoint:
   log_dir: "logs"

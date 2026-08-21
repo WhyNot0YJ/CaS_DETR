@@ -25,12 +25,9 @@ _experiments_root = Path(__file__).resolve().parent.parent
 if str(_experiments_root) not in sys.path:
     sys.path.insert(0, str(_experiments_root))
 
-# 本地 ``external/ultralytics`` 与 ``external/YOLOX``（非 site-packages）
+# YOLOX remains a local upstream dependency; Ultralytics comes from pip.
 _yolo_dir = Path(__file__).resolve().parent
-_external = _yolo_dir / "external"
-if _external.is_dir() and str(_external) not in sys.path:
-    sys.path.insert(0, str(_external))
-_yolox_repo = _external / "YOLOX"
+_yolox_repo = _yolo_dir / "external" / "YOLOX"
 if _yolox_repo.is_dir() and str(_yolox_repo) not in sys.path:
     sys.path.insert(0, str(_yolox_repo))
 
@@ -49,13 +46,6 @@ from common.model_benchmark import (
     merge_benchmark_dict_into_metrics,
 )
 from common.result_paths import result_csv
-from common.hierarchical_eval import (
-    collapse_ground_truth,
-    collapse_predictions,
-    compute_coco_metrics,
-    hierarchical_eval_spec,
-    hierarchical_metadata,
-)
 from common.det_eval_metrics import (
     PYCOCOTOOLS_AVAILABLE,
     coco_ap_at_iou50_all,
@@ -150,21 +140,15 @@ class BaseYOLOTrainer(ABC):
             ds_stem = Path(data_yaml).stem if data_yaml else 'unknown'
             protocol = os.environ.get('EXPERIMENT_DATASET_PROTOCOL', '').lower()
             protocol_dir = {
-                'dairv2x_vehicle5': 'dairv2x_vehicle5',
-                'dairv2x_vehicle8': 'dairv2x_vehicle8',
-                'uadetrac_vehicle1': 'uadetrac_vehicle1',
-                'uadetrac_vehicle4': 'uadetrac_vehicle4',
+                'dairv2x': 'dairv2x',
+                'uadetrac': 'uadetrac',
             }.get(protocol)
             if protocol_dir:
                 ds_dir = protocol_dir
-            elif 'vehicle5' in str(data_yaml).lower():
-                ds_dir = 'dairv2x_vehicle5'
             elif 'dairv2x' in ds_stem.lower() or 'dair' in ds_stem.lower():
-                ds_dir = 'dairv2x_vehicle8'
-            elif 'vehicle1' in str(data_yaml).lower():
-                ds_dir = 'uadetrac_vehicle1'
+                ds_dir = 'dairv2x'
             elif 'uadetrac' in ds_stem.lower() or 'ua' in ds_stem.lower() or ds_stem == 'data':
-                ds_dir = 'uadetrac_vehicle4'
+                ds_dir = 'uadetrac'
             else:
                 ds_dir = ds_stem
             # 锚定到本文件所在目录（experiments/yolo），避免 cwd 与 YOLOX/Ultralytics 不一致时路径错位
@@ -422,7 +406,10 @@ class BaseYOLOTrainer(ABC):
         # 恢复训练
         if resume_model_path is not None:
             self.logger.info(f"📦 从检查点恢复训练: {resume_model_path}")
-            train_kwargs['resume'] = True
+            # 传入 checkpoint 路径而不是布尔值：Ultralytics 对 stripped checkpoint
+            # （epoch/optimizer 元数据缺失）会把 resume=True 自动降级为从头训练。
+            # 路径形式允许训练器读取我们准备好的续训元数据，并从正确的 epoch 接续。
+            train_kwargs['resume'] = str(resume_model_path)
         
         # 记录配置
         self._log_training_config(train_kwargs)
@@ -587,14 +574,6 @@ class BaseYOLOTrainer(ABC):
             verbose=False,
         )
 
-    def _strict_validate_coco_eval_predictor(self, predictor) -> None:
-        """Require an exact state-dict match for hierarchical evaluation."""
-        module = getattr(predictor, 'model', predictor)
-        if not hasattr(module, 'state_dict') or not hasattr(module, 'load_state_dict'):
-            raise TypeError('evaluation predictor has no loadable model state')
-        module.load_state_dict(module.state_dict(), strict=True)
-        self.logger.info('Checkpoint compatibility verified with strict=True')
-
     def _benchmark_eval_predictor(self, eval_predictor) -> Optional[dict]:
         """GFLOPs/FPS on the same weights used for COCO eval (e.g. ``best.pt``)."""
         return self._run_model_benchmark(eval_predictor)
@@ -654,14 +633,10 @@ class BaseYOLOTrainer(ABC):
         data_yaml = str(self.data_config.get('data_yaml', '') or '')
         data_lower = data_yaml.lower()
         protocol = os.environ.get('EXPERIMENT_DATASET_PROTOCOL', '').lower()
-        if protocol == 'dairv2x_vehicle5' or 'vehicle5' in data_lower:
-            return 'DAIR-V2X-Vehicle5'
-        if protocol == 'dairv2x_vehicle8' or 'dairv2x' in data_lower or 'dair-v2x' in data_lower or 'dair' in data_lower:
-            return 'DAIR-V2X-Vehicle8'
-        if protocol == 'uadetrac_vehicle1' or 'vehicle1' in data_lower:
-            return 'UA-DETRAC-Vehicle1'
-        if protocol == 'uadetrac_vehicle4' or 'uadetrac' in data_lower or 'ua-detrac' in data_lower:
-            return 'UA-DETRAC-Vehicle4'
+        if protocol == 'dairv2x' or 'dairv2x' in data_lower or 'dair-v2x' in data_lower or 'dair' in data_lower:
+            return 'DAIR-V2X'
+        if protocol == 'uadetrac' or 'uadetrac' in data_lower or 'ua-detrac' in data_lower:
+            return 'UA-DETRAC'
 
         stem = Path(data_yaml).stem or 'unknown'
         stem_lower = stem.lower()
@@ -741,9 +716,6 @@ class BaseYOLOTrainer(ABC):
                 )
             return {}
 
-        if getattr(self, 'hierarchical_eval', None):
-            self._strict_validate_coco_eval_predictor(eval_predictor)
-
         device = self.misc_config.get('device', 'cuda')
         imgsz = self.training_config.get('imgsz', 640)
 
@@ -760,14 +732,6 @@ class BaseYOLOTrainer(ABC):
         dataset_name = self._canonical_dataset_name()
 
         class_names = self.class_names if self.class_names else [f'cls_{i}' for i in range(nc)]
-        hierarchical_eval = getattr(self, 'hierarchical_eval', None)
-        hierarchy_spec = (
-            hierarchical_eval_spec(hierarchical_eval) if hierarchical_eval else None
-        )
-        checkpoint_sha256 = getattr(self, 'hierarchical_checkpoint_sha256', '')
-        hierarchy_output_dir = self.log_dir / 'hierarchical_eval'
-        if hierarchical_eval:
-            hierarchy_output_dir.mkdir(parents=True, exist_ok=True)
 
         def _weather_metric_key(value: str) -> str:
             key = ''.join(ch.lower() if ch.isalnum() else '_' for ch in str(value))
@@ -801,23 +765,13 @@ class BaseYOLOTrainer(ABC):
                         weather_names.append(weather)
         weather_names = sorted(weather_names)
         weather_buckets = [_weather_metric_key(weather) for weather in weather_names]
-        summary_csv = (
-            result_csv('eval_metrics')
-            if hierarchical_eval
-            else result_csv('fine_grained_eval_metrics')
-        )
+        summary_csv = result_csv('eval_metrics')
         last_metrics: Dict[str, Any] = {}
 
         if True:
             for eval_split, eval_img_dirs, labels_meta_dir, coco_ann_file in splits:
                 # ── 3. Per-split: images + meta ───────────────────────────
-                source_coco_gt: Optional[Dict[str, Any]] = None
-                if hierarchical_eval and coco_ann_file and coco_ann_file.is_file():
-                    source_coco_gt = json.loads(
-                        coco_ann_file.read_text(encoding='utf-8')
-                    )
-                    meta_by_stem = self._load_coco_meta_by_stem(coco_ann_file)
-                elif labels_meta_dir and labels_meta_dir.is_dir() and any(labels_meta_dir.glob('*.json')):
+                if labels_meta_dir and labels_meta_dir.is_dir() and any(labels_meta_dir.glob('*.json')):
                     meta_by_stem = {p.stem: p for p in labels_meta_dir.glob('*.json')}
                 elif coco_ann_file and coco_ann_file.is_file():
                     meta_by_stem = self._load_coco_meta_by_stem(coco_ann_file)
@@ -1006,47 +960,18 @@ class BaseYOLOTrainer(ABC):
                 fine_categories_coco = [
                     {'id': i + 1, 'name': class_names[i]} for i in range(nc)
                 ]
-                if source_coco_gt is not None:
-                    selected_image_ids = set(img_sizes)
-                    fine_coco_gt = {
-                        **{
-                            key: value
-                            for key, value in source_coco_gt.items()
-                            if key not in {'images', 'annotations', 'categories'}
-                        },
-                        'images': [
-                            dict(image)
-                            for image in source_coco_gt.get('images', [])
-                            if int(image['id']) in selected_image_ids
-                        ],
-                        'categories': [
-                            dict(category)
-                            for category in source_coco_gt.get('categories', [])
-                        ],
-                        'annotations': [
-                            dict(annotation)
-                            for annotation in source_coco_gt.get('annotations', [])
-                            if int(annotation['image_id']) in selected_image_ids
-                        ],
-                    }
-                    if len(fine_coco_gt['images']) != len(eval_images):
-                        raise RuntimeError(
-                            f'{eval_split} original COCO image count mismatch: '
-                            f"{len(fine_coco_gt['images'])} != {len(eval_images)}"
-                        )
-                else:
-                    fine_coco_gt = {
-                        'images': [
-                            {
-                                'id': image_id,
-                                'width': w,
-                                'height': h,
-                            }
-                            for image_id, (w, h) in img_sizes.items()
-                        ],
-                        'categories': fine_categories_coco,
-                        'annotations': coco_annotations,
-                    }
+                fine_coco_gt = {
+                    'images': [
+                        {
+                            'id': image_id,
+                            'width': w,
+                            'height': h,
+                        }
+                        for image_id, (w, h) in img_sizes.items()
+                    ],
+                    'categories': fine_categories_coco,
+                    'annotations': coco_annotations,
+                }
 
                 eval_class_names = class_names
                 eval_nc = nc
@@ -1058,67 +983,6 @@ class BaseYOLOTrainer(ABC):
                     'experiment': self.experiment_name,
                     'seed': self.config.get('seed', ''),
                 }
-                if hierarchical_eval:
-                    raw_prediction_path = (
-                        hierarchy_output_dir / f'predictions_{eval_split}.json'
-                    )
-                    collapsed_prediction_path = (
-                        hierarchy_output_dir
-                        / f'predictions_{eval_split}_collapsed.json'
-                    )
-                    raw_prediction_path.write_text(
-                        json.dumps(coco_predictions, ensure_ascii=False),
-                        encoding='utf-8',
-                    )
-                    fine_metrics = compute_coco_metrics(
-                        fine_coco_gt, coco_predictions
-                    )
-                    fine_metrics['eval_split'] = eval_split
-                    write_eval_csv(
-                        result_csv('fine_grained_eval_metrics'),
-                        model=model_name,
-                        dataset=dataset_name,
-                        eval_split=eval_split,
-                        metrics=fine_metrics,
-                        class_names=class_names,
-                        metadata={
-                            **csv_metadata,
-                            **hierarchical_metadata(
-                                hierarchical_eval, checkpoint_sha256
-                            ),
-                            'evaluation_taxonomy': hierarchy_spec['training_protocol'],
-                            'postprocess': 'native',
-                            'prediction_file': str(raw_prediction_path),
-                        },
-                    )
-                    coco_gt = collapse_ground_truth(
-                        fine_coco_gt, hierarchical_eval
-                    )
-                    eval_predictions = collapse_predictions(
-                        coco_predictions, hierarchical_eval
-                    )
-                    if len(eval_predictions) != len(coco_predictions):
-                        raise AssertionError(
-                            'label collapse changed the prediction count'
-                        )
-                    collapsed_prediction_path.write_text(
-                        json.dumps(eval_predictions, ensure_ascii=False),
-                        encoding='utf-8',
-                    )
-                    eval_class_names = [
-                        str(category['name'])
-                        for category in hierarchy_spec['categories']
-                    ]
-                    eval_nc = len(eval_class_names)
-                    csv_metadata.update(
-                        hierarchical_metadata(
-                            hierarchical_eval, checkpoint_sha256
-                        )
-                    )
-                    csv_metadata['prediction_file'] = str(
-                        collapsed_prediction_path
-                    )
-
                 categories_coco = coco_gt['categories']
 
                 coco_eval = run_coco_bbox_eval(coco_gt, eval_predictions)
@@ -1358,14 +1222,10 @@ class BaseYOLOTrainer(ABC):
         data_yaml = str(self.data_config.get("data_yaml", ""))
         data_lower = data_yaml.lower()
         protocol = os.environ.get("EXPERIMENT_DATASET_PROTOCOL", "").lower()
-        if protocol == "dairv2x_vehicle5" or "vehicle5" in data_lower:
-            dataset = "DAIR-V2X-Vehicle5"
-        elif protocol == "dairv2x_vehicle8" or "dair" in data_lower:
-            dataset = "DAIR-V2X-Vehicle8"
-        elif protocol == "uadetrac_vehicle1" or "vehicle1" in data_lower:
-            dataset = "UA-DETRAC-Vehicle1"
-        elif protocol == "uadetrac_vehicle4" or "uadetrac" in data_lower or "ua-detrac" in data_lower:
-            dataset = "UA-DETRAC-Vehicle4"
+        if protocol == "dairv2x" or "dair" in data_lower:
+            dataset = "DAIR-V2X"
+        elif protocol == "uadetrac" or "uadetrac" in data_lower or "ua-detrac" in data_lower:
+            dataset = "UA-DETRAC"
         else:
             dataset = Path(data_yaml).stem or "unknown"
 

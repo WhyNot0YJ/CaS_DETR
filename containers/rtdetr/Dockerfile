@@ -30,6 +30,7 @@ RUN pip install --no-cache-dir \
     opencv-python \
     Pillow \
     matplotlib \
+    "ultralytics==8.3.195" \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 CMD ["/bin/bash"]

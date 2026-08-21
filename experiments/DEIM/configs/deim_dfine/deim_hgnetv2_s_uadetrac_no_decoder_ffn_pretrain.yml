@@ -1,0 +1,33 @@
+# Fair DEIM baseline: keep pretrained decoder attention and remove only dense FFN weights.
+__include__: [
+  './deim_hgnetv2_s_coco.yml',
+  '../dataset/uadetrac_detection.yml',
+]
+
+output_dir: ./outputs/deim_hgnetv2_s_uadetrac_no_decoder_ffn_pretrain
+
+tuning: pretrained/deim_dfine_hgnetv2_s_coco_120e_no_decoder_ffn.pth
+
+epoches: 132
+flat_epoch: 64
+no_aug_epoch: 12
+warmup_iter: 500
+
+train_dataloader:
+  total_batch_size: 16
+  num_workers: 12
+  pin_memory: False
+  dataset:
+    transforms:
+      policy:
+        epoch: [4, 64, 120]
+  collate_fn:
+    mixup_epochs: [4, 64]
+    stop_epoch: 120
+    scale_low_ratio: 0.75
+    scale_high_ratio: 1.25
+
+val_dataloader:
+  total_batch_size: 64
+  num_workers: 12
+  pin_memory: False

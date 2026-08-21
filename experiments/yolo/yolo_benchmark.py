@@ -17,10 +17,7 @@ if str(_experiments_root) not in sys.path:
     sys.path.insert(0, str(_experiments_root))
 
 _bm_yolo_dir = Path(__file__).resolve().parent
-_bm_ext = _bm_yolo_dir / "external"
-if _bm_ext.is_dir() and str(_bm_ext) not in sys.path:
-    sys.path.insert(0, str(_bm_ext))
-_bm_yolox = _bm_ext / "YOLOX"
+_bm_yolox = _bm_yolo_dir / "external" / "YOLOX"
 if _bm_yolox.is_dir() and str(_bm_yolox) not in sys.path:
     sys.path.insert(0, str(_bm_yolox))
 

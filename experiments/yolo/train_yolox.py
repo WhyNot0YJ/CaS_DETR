@@ -21,6 +21,7 @@ from common.dataset_registry import (
     resolve_dataset_profile,
 )
 from common.dataset_protocol import set_report_protocol
+from common.train_notifications import notify_training_entry
 
 DEFAULT_CLASS_NAMES: List[str] = []
 
@@ -42,15 +43,14 @@ def merge_coco_root_from_profile(config: dict, profile: Optional[dict]) -> dict:
     return merged
 
 
+@notify_training_entry("YOLOX")
 def main():
     parser = argparse.ArgumentParser(description="YOLOX 训练（CaS_DETR）")
     parser.add_argument("--config", type=str, default=None, help="YAML 配置文件路径")
     parser.add_argument("--dataset", type=str, default=None, help="数据集键名（configs/datasets.yaml）")
     protocol = parser.add_mutually_exclusive_group()
-    protocol.add_argument("--dairv2x-vehicle5", action="store_true")
-    protocol.add_argument("--dairv2x-vehicle8", action="store_true")
-    protocol.add_argument("--uadetrac-vehicle1", action="store_true")
-    protocol.add_argument("--uadetrac-vehicle4", action="store_true")
+    protocol.add_argument("--dairv2x", action="store_true")
+    protocol.add_argument("--uadetrac", action="store_true")
     parser.add_argument(
         "--dataset_registry",
         type=str,
@@ -74,14 +74,10 @@ def main():
     if not registry_path.is_absolute():
         registry_path = _yolo_dir / registry_path
     datasets = load_dataset_registry(registry_path)
-    if args.dairv2x_vehicle5:
-        args.dataset = "dairv2x_vehicle5"
-    elif args.dairv2x_vehicle8:
-        args.dataset = "dairv2x_vehicle8"
-    elif args.uadetrac_vehicle1:
-        args.dataset = "uadetrac_vehicle1"
-    elif args.uadetrac_vehicle4:
-        args.dataset = "uadetrac_vehicle4"
+    if args.dairv2x:
+        args.dataset = "dairv2x"
+    elif args.uadetrac:
+        args.dataset = "uadetrac"
 
     profile = None
     if args.dataset:
@@ -102,7 +98,7 @@ def main():
             if isinstance(pc, list) and pc:
                 selected_class_names = [str(x) for x in pc]
     if profile:
-        set_report_protocol(str(profile.get("report_protocol", "dairv2x_vehicle5")))
+        set_report_protocol(str(profile.get("report_protocol", "dairv2x")))
 
     if args.resume and not args.resume_from_checkpoint:
         log_base = config.get("checkpoint", {}).get("log_dir", "logs")
@@ -137,6 +133,7 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     trainer.run_tensorrt_benchmark()
+    return {"output_dir": str(trainer.log_dir)}
 
 
 def _infer_dataset_log_subdir(config: dict) -> Optional[str]:
@@ -144,14 +141,10 @@ def _infer_dataset_log_subdir(config: dict) -> Optional[str]:
     data_yaml = config.get("data", {}).get("data_yaml", "") or ""
     path_s = str(data_yaml).lower()
     stem = Path(data_yaml).stem.lower() if data_yaml else ""
-    if "vehicle5" in path_s:
-        return "dairv2x_vehicle5"
     if "dair" in path_s or "dairv2x" in stem:
-        return "dairv2x_vehicle8"
-    if "vehicle1" in path_s:
-        return "uadetrac_vehicle1"
+        return "dairv2x"
     if "uadetrac" in path_s or "ua-detrac" in path_s or stem == "data":
-        return "uadetrac_vehicle4"
+        return "uadetrac"
     return None
 
 

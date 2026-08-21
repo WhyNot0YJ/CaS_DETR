@@ -4,12 +4,13 @@ model:
   yolox_exp_file: "yolox_exps/yolox_s_dairv2x.py"
 
 training:
-  epochs: 100
+  epochs: 132
+  no_aug_epochs: 32
   batch_size: 16
 
 data:
-  data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO_Vehicle5/dairv2x_vehicle5.yaml"
-  coco_data_root: "/root/autodl-fs/datasets/DAIR-V2X-Vehicle5"
+  data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO/dairv2x.yaml"
+  coco_data_root: "/root/autodl-fs/datasets/DAIR-V2X"
 
 checkpoint:
   log_dir: "logs"

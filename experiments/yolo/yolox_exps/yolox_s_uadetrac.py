@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YOLOX-S on the default UA-DETRAC Vehicle1 protocol."""
+"""YOLOX-S on the native UA-DETRAC protocol."""
 
 import os
 

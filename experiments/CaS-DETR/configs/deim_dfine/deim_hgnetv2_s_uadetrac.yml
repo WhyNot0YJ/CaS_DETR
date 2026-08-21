@@ -7,8 +7,8 @@ output_dir: ./outputs/deim_hgnetv2_s_uadetrac
 
 tuning: pretrained/deim_dfine_hgnetv2_s_coco_120e.pth
 
-epoches: 100
-flat_epoch: 48
+epoches: 132
+flat_epoch: 64
 no_aug_epoch: 12
 warmup_iter: 500
 
@@ -18,10 +18,10 @@ train_dataloader:
   dataset:
     transforms:
       policy:
-        epoch: [4, 48, 88]
+        epoch: [4, 64, 120]
   collate_fn:
-    mixup_epochs: [4, 48]
-    stop_epoch: 88
+    mixup_epochs: [4, 64]
+    stop_epoch: 120
     scale_low_ratio: 0.75
     scale_high_ratio: 1.25
 

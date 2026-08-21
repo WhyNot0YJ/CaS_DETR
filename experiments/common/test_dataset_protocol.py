@@ -26,45 +26,31 @@ CAS_UA = (
 
 
 class DatasetProtocolTest(unittest.TestCase):
-    def test_vehicle8_is_the_dair_default(self):
+    def test_dairv2x_is_the_default(self):
         update = {}
         protocol = apply_detr_protocol_overrides(update, CAS_DAIR, None)
 
-        self.assertEqual(protocol, "dairv2x_vehicle8")
+        self.assertEqual(protocol, "dairv2x")
         self.assertEqual(update["num_classes"], 8)
         self.assertIn("/DAIR-V2X/annotations/", update["train_dataloader"]["dataset"]["ann_file"])
         self.assertEqual(
             update["output_dir"],
-            "./outputs/dairv2x_vehicle8/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x",
+            "./outputs/dairv2x/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x",
         )
 
-    def test_vehicle5_is_an_explicit_legacy_override(self):
-        update = {}
-        protocol = apply_detr_protocol_overrides(
-            update, CAS_DAIR, "dairv2x_vehicle5"
-        )
-
-        self.assertEqual(protocol, "dairv2x_vehicle5")
-        self.assertEqual(update["num_classes"], 5)
-        self.assertIn("DAIR-V2X-Vehicle5", update["val_dataloader"]["dataset"]["ann_file"])
-        self.assertEqual(
-            update["output_dir"],
-            "./outputs/dairv2x_vehicle5/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x",
-        )
-
-    def test_uadetrac_vehicle1_is_the_default(self):
+    def test_uadetrac_is_the_default(self):
         previous = os.environ.get("EXPERIMENT_DATASET_PROTOCOL")
         try:
             update = {}
             protocol = apply_detr_protocol_overrides(update, CAS_UA, None)
 
-            self.assertEqual(protocol, "uadetrac_vehicle1")
-            self.assertEqual(update["num_classes"], 1)
+            self.assertEqual(protocol, "uadetrac")
+            self.assertEqual(update["num_classes"], 4)
             self.assertIn(
-                "UA-DETRAC-Vehicle1",
+                "UA-DETRAC_COCO",
                 update["val_dataloader"]["dataset"]["ann_file"],
             )
-            self.assertIn("./outputs/uadetrac_vehicle1/", protocol_output_dir(CAS_UA, None))
+            self.assertIn("./outputs/uadetrac/", protocol_output_dir(CAS_UA, None))
         finally:
             if previous is None:
                 os.environ.pop("EXPERIMENT_DATASET_PROTOCOL", None)
@@ -75,10 +61,10 @@ class DatasetProtocolTest(unittest.TestCase):
         previous = os.environ.get("EXPERIMENT_DATASET_PROTOCOL")
         try:
             self.assertEqual(
-                set_report_protocol("uadetrac_vehicle4"), "uadetrac_vehicle4"
+                set_report_protocol("uadetrac"), "uadetrac"
             )
             self.assertEqual(
-                os.environ["EXPERIMENT_DATASET_PROTOCOL"], "uadetrac_vehicle4"
+                os.environ["EXPERIMENT_DATASET_PROTOCOL"], "uadetrac"
             )
         finally:
             if previous is None:
@@ -88,8 +74,8 @@ class DatasetProtocolTest(unittest.TestCase):
 
     def test_explicit_output_path_is_namespaced(self):
         self.assertEqual(
-            protocol_output_path("outputs/batch_r18_dairv2x", "dairv2x_vehicle5"),
-            "outputs/dairv2x_vehicle5/batch_r18_dairv2x",
+            protocol_output_path("outputs/batch_r18_dairv2x", "dairv2x"),
+            "outputs/dairv2x/batch_r18_dairv2x",
         )
 
 

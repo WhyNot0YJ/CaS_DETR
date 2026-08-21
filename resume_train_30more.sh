@@ -1,5 +1,5 @@
 #!/bin/bash
-# Continue 4 CaS-DETR ablation experiments (dairv2x_vehicle8) for +30 epochs each.
+# Continue 4 CaS-DETR ablation experiments (dairv2x) for +30 epochs each.
 # Resumes from last.pth (epoch 99) -> epoches=130 -> trains epochs 100..129.
 # Also merges existing D-FINE/DEIM stage1+stage2 logs into continuous history.
 #
@@ -80,28 +80,28 @@ merge_logs
 # ── 2. CaS-DETR: cap05x (epoch 100→129) ──
 run_one CaS-DETR \
   configs/dataset/ablation/archive/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml \
-  "$ROOT/experiments/CaS-DETR/outputs/dairv2x_vehicle8/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x/last.pth" \
+  "$ROOT/experiments/CaS-DETR/outputs/dairv2x/ablation/cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x/last.pth" \
   --dairv2x-vehicle8 "epoches=130" \
   cas_deim_moe4_cap05x_dairv2x
 
 # ── 3. CaS-DETR: cap1x (epoch 100→129) ──
 run_one CaS-DETR \
   configs/dataset/ablation/archive/cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml \
-  "$ROOT/experiments/CaS-DETR/outputs/dairv2x_vehicle8/ablation/cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x/last.pth" \
+  "$ROOT/experiments/CaS-DETR/outputs/dairv2x/ablation/cas_deim_moe4_cap1x_cass_caip_base03_a10_hgnetv2_s_dairv2x/last.pth" \
   --dairv2x-vehicle8 "epoches=130" \
   cas_deim_moe4_cap1x_dairv2x
 
 # ── 4. CaS-DETR: cap2x (epoch 100→129) ──
 run_one CaS-DETR \
   configs/dataset/ablation/archive/cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml \
-  "$ROOT/experiments/CaS-DETR/outputs/dairv2x_vehicle8/ablation/cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x/last.pth" \
+  "$ROOT/experiments/CaS-DETR/outputs/dairv2x/ablation/cas_deim_moe4_cap2x_cass_caip_base03_a10_hgnetv2_s_dairv2x/last.pth" \
   --dairv2x-vehicle8 "epoches=130" \
   cas_deim_moe4_cap2x_dairv2x
 
 # ── 5. CaS-DETR: cass_caip (epoch 100→129) ──
 run_one CaS-DETR \
   configs/dataset/ablation/archive/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml \
-  "$ROOT/experiments/CaS-DETR/outputs/dairv2x_vehicle8/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/last.pth" \
+  "$ROOT/experiments/CaS-DETR/outputs/dairv2x/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x/last.pth" \
   --dairv2x-vehicle8 "epoches=130" \
   cas_deim_moe4_cass_caip_dairv2x
 

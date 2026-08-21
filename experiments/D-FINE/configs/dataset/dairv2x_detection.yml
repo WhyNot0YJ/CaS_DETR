@@ -6,8 +6,8 @@ evaluator:
   type: CocoEvaluatorTrainLabelMapping
   iou_types: ['bbox']
 
-# Default protocol: Car + Truck + Van + Bus -> vehicle.
-num_classes: 5
+# Default protocol: native DAIR-V2X eight-class labels.
+num_classes: 8
 remap_mscoco_category: False
 
 vis_after_train: true
@@ -18,8 +18,8 @@ train_dataloader:
   type: DataLoader
   dataset:
     type: CocoDetection
-    img_folder: /root/autodl-fs/datasets/DAIR-V2X-Vehicle5
-    ann_file: /root/autodl-fs/datasets/DAIR-V2X-Vehicle5/annotations/instances_train.json
+    img_folder: /root/autodl-fs/datasets/DAIR-V2X
+    ann_file: /root/autodl-fs/datasets/DAIR-V2X/annotations/instances_train.json
     return_masks: False
   shuffle: True
   num_workers: 12
@@ -31,8 +31,8 @@ val_dataloader:
   type: DataLoader
   dataset:
     type: CocoDetection
-    img_folder: /root/autodl-fs/datasets/DAIR-V2X-Vehicle5
-    ann_file: /root/autodl-fs/datasets/DAIR-V2X-Vehicle5/annotations/instances_val.json
+    img_folder: /root/autodl-fs/datasets/DAIR-V2X
+    ann_file: /root/autodl-fs/datasets/DAIR-V2X/annotations/instances_val.json
     return_masks: False
   shuffle: False
   num_workers: 12

@@ -75,6 +75,8 @@ class DetSolver(BaseSolver):
 
             # TODO 
             for k in test_stats:
+                if k == 'loss':
+                    continue
                 if self.writer and dist_utils.is_main_process():
                     for i, v in enumerate(test_stats[k]):
                         self.writer.add_scalar(f'Test/{k}_{i}'.format(k), v, epoch)

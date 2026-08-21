@@ -31,10 +31,8 @@ def parse_args():
     parser.add_argument(
         "--dataset-protocol",
         choices=(
-            "dairv2x_vehicle5",
-            "dairv2x_vehicle8",
-            "uadetrac_vehicle1",
-            "uadetrac_vehicle4",
+            "dairv2x",
+            "uadetrac",
         ),
     )
     return parser.parse_args()

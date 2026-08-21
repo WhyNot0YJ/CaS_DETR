@@ -9,7 +9,6 @@ from .common import (
     freeze_batch_norm2d,
 )
 from .presnet import PResNet
-from .test_resnet import MResNet
 
 from .timm_model import TimmModel
 from .torchvision_model import TorchVisionModel

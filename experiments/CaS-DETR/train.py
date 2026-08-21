@@ -25,16 +25,7 @@ from engine.misc import dist_utils
 from engine.core import YAMLConfig, yaml_utils
 from engine.solver import TASKS
 from common.dataset_protocol import apply_detr_protocol_overrides
-
-debug=False
-
-if debug:
-    import torch
-    def custom_repr(self):
-        return f'{{Tensor:{tuple(self.shape)}}} {original_repr(self)}'
-    original_repr = torch.Tensor.__repr__
-    torch.Tensor.__repr__ = custom_repr
-
+from common.train_notifications import notify_training_entry
 
 def _resolve_tuning_checkpoint(cfg):
     """``tuning`` 可为 yaml 或 ``-t``；相对路径相对 DEIM 目录解析。缺文件则放弃整网微调。"""
@@ -96,6 +87,7 @@ def _save_run_metadata(cfg, config_path):
         json.dump(environment, f, indent=2, ensure_ascii=False)
 
 
+@notify_training_entry("CaS-DETR")
 def main(args, ) -> None:
     """main
     """
@@ -132,6 +124,7 @@ def main(args, ) -> None:
         solver.fit()
 
     dist_utils.cleanup()
+    return {"output_dir": str(cfg.output_dir)}
 
 
 if __name__ == '__main__':
@@ -148,10 +141,8 @@ if __name__ == '__main__':
     parser.add_argument('--summary-dir', type=str, help='tensorboard summry')
     parser.add_argument('--test-only', action='store_true', default=False,)
     protocol = parser.add_mutually_exclusive_group()
-    protocol.add_argument('--dairv2x-vehicle5', dest='dataset_protocol', action='store_const', const='dairv2x_vehicle5')
-    protocol.add_argument('--dairv2x-vehicle8', dest='dataset_protocol', action='store_const', const='dairv2x_vehicle8')
-    protocol.add_argument('--uadetrac-vehicle1', dest='dataset_protocol', action='store_const', const='uadetrac_vehicle1')
-    protocol.add_argument('--uadetrac-vehicle4', dest='dataset_protocol', action='store_const', const='uadetrac_vehicle4')
+    protocol.add_argument('--dairv2x', dest='dataset_protocol', action='store_const', const='dairv2x')
+    protocol.add_argument('--uadetrac', dest='dataset_protocol', action='store_const', const='uadetrac')
 
     # priority 1
     parser.add_argument('-u', '--update', nargs='+', help='update yaml config')

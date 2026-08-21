@@ -39,29 +39,14 @@ experiments/
 
 ## 数据协议
 
-项目正式支持四个协议：
+项目正式支持两个协议：
 
-| 数据集 | 默认协议 | 旧协议 |
+| 数据集 | 协议 | 类别数 |
 | --- | --- | --- |
-| DAIR-V2X | `dairv2x_vehicle8` | `dairv2x_vehicle5` |
-| UA-DETRAC | `uadetrac_vehicle1` | `uadetrac_vehicle4` |
+| DAIR-V2X | `dairv2x` | 8 |
+| UA-DETRAC | `uadetrac` | 4 |
 
-DAIR Vehicle5 将 `Car/Truck/Van/Bus` 合并为 `vehicle`，保留
-`Pedestrian`、`Cyclist`、`Motorcyclist`、`Trafficcone`；UA Vehicle1 将
-`car/van/bus/others` 合并为 `vehicle`。派生协议保留原始框，只改变类别 ID，不修改原始数据。
-
-合并类别是为了避免单一小目标类别主导 COCO `AP_small`，并使跨模型比较的类别定义一致。`AP_small` 仍按 COCO 面积阈值统计，不能解释为某一个具体类别的 AP；small 目标过少时应谨慎解读。
-
-数据准备：
-
-```bash
-/root/autodl-tmp/cas_trt_env/bin/python experiments/common/prepare_dairv2x_vehicle5.py
-/root/autodl-tmp/cas_trt_env/bin/python experiments/common/prepare_uadetrac_vehicle1.py
-```
-
-派生数据位于 `/root/autodl-fs/datasets/` 下的 `DAIR-V2X-Vehicle5`、
-`DAIR-V2X_YOLO_Vehicle5`、`UA-DETRAC-Vehicle1` 和
-`UA-DETRAC_YOLO_Vehicle1`。
+DAIR-V2X 使用原生八类标注，UA-DETRAC 使用原生四类标注
 
 ## 快速开始
 
@@ -73,7 +58,7 @@ cd experiments/CaS-DETR
   -c configs/deim_dfine/cas_detr_hgnetv2_s_dairv2x.yml
 ```
 
-统一批量入口默认使用 Vehicle8/Vehicle1：
+统一批量入口使用上述两个原生协议：
 
 ```bash
 cd experiments
@@ -81,44 +66,25 @@ cd experiments
 ./run_batch_experiments.sh --yes --yolo --s
 ```
 
-旧协议必须显式指定：
-
-```bash
-./run_batch_experiments.sh --dairv2x-vehicle5 --dairv2x --yolo --s
-./run_batch_experiments.sh --uadetrac-vehicle4 --uadetrac --yolo --s
-```
-
 配置通过 `__include__` 组合基础模型、数据集和组件。新增实验应新建派生 YAML，不要复制整套消融配置。
 
 训练输出按协议隔离，格式为 `outputs/<protocol>/<group>/<experiment>`；例如
-`DQM-DETR/outputs/dairv2x_vehicle5/main/...`。YOLO 使用同样的协议优先目录规则。
+`DQM-DETR/outputs/dairv2x/main/...`。YOLO 使用同样的协议优先目录规则。
 
 ## Checkpoint 与评测
 
-checkpoint 必须与训练协议一致，Vehicle5/Vehicle1 不能与 Vehicle8/Vehicle4 混用。评测结果由 `experiments/common/result_paths.py` 路由到：
+checkpoint 必须与训练协议一致。评测结果由 `experiments/common/result_paths.py` 路由到：
 
 ```text
 experiments/reports/
-├── dairv2x_vehicle5/
-├── dairv2x_vehicle8/
-├── uadetrac_vehicle1/
-└── uadetrac_vehicle4/
+├── dairv2x/
+└── uadetrac/
 ```
 
 训练、评测、测速和不同实验分组不写入同一张表。主线默认使用单 seed，并在结果中保留
 seed 信息；多 seed 汇总仅在确有需要时执行。
 
-UA Vehicle4 权重无须重训即可按 Vehicle1 评测：
-
-```bash
-/root/autodl-tmp/cas_trt_env/bin/python \
-  experiments/common/evaluate_uadetrac_vehicle1.py \
-  --ground-truth /root/autodl-fs/datasets/UA-DETRAC_COCO/annotations/instances_val.json \
-  --predictions <vehicle4_predictions.json> \
-  --model-name <model>
-```
-
-该评测会将四类预测合并为 `vehicle`，执行 class-agnostic NMS，再写入 `uadetrac_vehicle1` 报告目录。
+UA-DETRAC 评测直接使用四类原生标注和预测，不再做类别合并。
 
 ## 部署测速
 

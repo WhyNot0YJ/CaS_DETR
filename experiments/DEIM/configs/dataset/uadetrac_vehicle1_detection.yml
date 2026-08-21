@@ -1,3 +1,0 @@
-__include__: ['./uadetrac_detection.yml']
-
-# Explicit alias for the default one-class UA-DETRAC protocol.

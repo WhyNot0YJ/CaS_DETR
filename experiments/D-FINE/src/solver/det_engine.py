@@ -193,6 +193,18 @@ def evaluate(
         samples = samples.to(device, non_blocking=True)
         targets = [{k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
 
+        model.train()
+        for module in model.modules():
+            if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                module.eval()
+        try:
+            loss_outputs = model(samples, targets=targets)
+            loss_dict = criterion(loss_outputs, targets)
+            loss_dict_reduced = dist_utils.reduce_dict(loss_dict)
+        finally:
+            model.eval()
+        metric_logger.update(loss=sum(loss_dict_reduced.values()))
+
         outputs = model(samples)
         # with torch.autocast(device_type=str(device)):
         #     outputs = model(samples)
@@ -252,6 +264,8 @@ def evaluate(
         coco_evaluator.summarize()
 
     stats = {}
+    if "loss" in metric_logger.meters:
+        stats["loss"] = metric_logger.loss.global_avg
     # stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     if coco_evaluator is not None:
         if "bbox" in iou_types:

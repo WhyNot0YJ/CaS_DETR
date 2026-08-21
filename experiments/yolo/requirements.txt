@@ -9,9 +9,8 @@ torch>=2.5.0
 torchvision>=0.20.0
 torchaudio>=2.5.0
 
-# YOLO/Ultralytics (using local copy in ultralytics/)
-# The ultralytics package is included locally, but may need these dependencies:
-# ultralytics  # If using pip version instead of local copy
+# YOLO/Ultralytics (pinned for checkpoint/API compatibility)
+ultralytics==8.3.195
 
 # Computer Vision and Object Detection
 faster-coco-eval>=1.6.6

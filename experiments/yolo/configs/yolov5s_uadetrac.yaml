@@ -3,10 +3,11 @@ model:
   pretrained_weights: "pretrained/yolov5s.pt"
 
 training:
-  epochs: 100
+  epochs: 132
+  close_mosaic: 32
 
 data:
-  data_yaml: "/root/autodl-fs/datasets/UA-DETRAC_YOLO_Vehicle1/uadetrac_vehicle1.yaml"
+  data_yaml: "/root/autodl-fs/datasets/UA-DETRAC_YOLO/data.yaml"
 
 checkpoint:
   log_dir: "logs"

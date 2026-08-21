@@ -2,12 +2,11 @@
 # test plus labels_meta/test enables post-training test mAP in base_yolo_trainer.
 # coco_data_root / detr_dataset_class / num_classes are shared by DETR-style runners.
 datasets:
-  # Original 8-class protocol; kept unchanged for existing runs and checkpoints.
-  dairv2x_vehicle8:
+  dairv2x:
     aliases:
       - DAIR-V2X_YOLO
-      - dair-v2x-vehicle8
-    report_protocol: dairv2x_vehicle8
+      - dair-v2x
+    report_protocol: dairv2x
     data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO/dairv2x.yaml"
     coco_data_root: "/root/autodl-fs/datasets/DAIR-V2X"
     detr_dataset_class: "DAIRV2XDetection"
@@ -22,46 +21,12 @@ datasets:
       - Motorcyclist
       - Trafficcone
 
-  # Native 5-class protocol. Generate it with:
-  # python ../common/prepare_dairv2x_vehicle5.py
-  dairv2x_vehicle5:
+  uadetrac:
     aliases:
-      - dairv2x
-      - dair-v2x
-      - dair-v2x-vehicle5
-      - DAIR-V2X_YOLO_Vehicle5
-    report_protocol: dairv2x_vehicle5
-    data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO_Vehicle5/dairv2x_vehicle5.yaml"
-    coco_data_root: "/root/autodl-fs/datasets/DAIR-V2X-Vehicle5"
-    detr_dataset_class: "DAIRV2XDetection"
-    num_classes: 5
-    class_names:
-      - vehicle
-      - Pedestrian
-      - Cyclist
-      - Motorcyclist
-      - Trafficcone
-
-  uadetrac_vehicle1:
-    aliases:
-      - uadetrac
       - ua-detrac
-      - ua-detrac-vehicle1
-      - UA-DETRAC_YOLO_Vehicle1
-    report_protocol: uadetrac_vehicle1
-    data_yaml: "/root/autodl-fs/datasets/UA-DETRAC_YOLO_Vehicle1/uadetrac_vehicle1.yaml"
-    coco_data_root: "/root/autodl-fs/datasets/UA-DETRAC-Vehicle1"
-    detr_dataset_class: "CocoFolderDetection"
-    num_classes: 1
-    class_names:
-      - vehicle
-
-  uadetrac_vehicle4:
-    aliases:
       - UADETRAC_YOLO
       - UA-DETRAC_YOLO
-      - ua-detrac-vehicle4
-    report_protocol: uadetrac_vehicle4
+    report_protocol: uadetrac
     data_yaml: "/root/autodl-fs/datasets/UA-DETRAC_YOLO/data.yaml"
     coco_data_root: "/root/autodl-fs/datasets/UA-DETRAC_COCO"
     detr_dataset_class: "CocoFolderDetection"

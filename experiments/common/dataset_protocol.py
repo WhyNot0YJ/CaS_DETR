@@ -10,39 +10,23 @@ import yaml
 
 
 DEFAULT_PROTOCOLS = {
-    "dairv2x": "dairv2x_vehicle8",
-    "uadetrac": "uadetrac_vehicle1",
+    "dairv2x": "dairv2x",
+    "uadetrac": "uadetrac",
 }
 PROTOCOLS = (
-    "dairv2x_vehicle5",
-    "dairv2x_vehicle8",
-    "uadetrac_vehicle1",
-    "uadetrac_vehicle4",
+    "dairv2x",
+    "uadetrac",
 )
 PROTOCOL_SPECS = {
-    "dairv2x_vehicle5": {
-        "dataset": "dairv2x",
-        "root": Path("/root/autodl-fs/datasets/DAIR-V2X-Vehicle5"),
-        "num_classes": 5,
-        "suffix": "vehicle5",
-    },
-    "dairv2x_vehicle8": {
+    "dairv2x": {
         "dataset": "dairv2x",
         "root": Path("/root/autodl-fs/datasets/DAIR-V2X"),
         "num_classes": 8,
-        "suffix": "vehicle8",
     },
-    "uadetrac_vehicle1": {
-        "dataset": "uadetrac",
-        "root": Path("/root/autodl-fs/datasets/UA-DETRAC-Vehicle1"),
-        "num_classes": 1,
-        "suffix": "vehicle1",
-    },
-    "uadetrac_vehicle4": {
+    "uadetrac": {
         "dataset": "uadetrac",
         "root": Path("/root/autodl-fs/datasets/UA-DETRAC_COCO"),
         "num_classes": 4,
-        "suffix": "vehicle4",
     },
 }
 
@@ -104,14 +88,8 @@ def _detect_dataset(config_path: Path, resolved: Dict[str, Any]) -> str | None:
 
 def _protocol_output_dir(value: str, protocol: str) -> str:
     value = str(value).replace("\\", "/")
-    for suffix in ("_vehicle1", "_vehicle4", "_vehicle5", "_vehicle8"):
-        if value.rsplit("/", 1)[-1].endswith(suffix):
-            value = value[: -len(suffix)]
-            break
-
     # Keep experiment groups below a protocol namespace, matching YOLO's
-    # ``logs/<protocol>/<run>`` layout.  This also prevents a protocol suffix
-    # from leaking into the experiment name when an old config is reused.
+    # ``logs/<protocol>/<run>`` layout.
     parts = value.split("/")
     for index, part in enumerate(parts):
         if part not in {"outputs", "output"}:
@@ -199,8 +177,6 @@ def apply_detr_protocol_overrides(
             },
         },
     )
-    if protocol == "dairv2x_vehicle5" and "cross_domain_eval" in resolved:
-        _merge(update_dict, {"cross_domain_eval": {"enable": False}})
     if "output_dir" not in update_dict and resolved.get("output_dir"):
         update_dict["output_dir"] = _protocol_output_dir(
             str(resolved["output_dir"]), protocol

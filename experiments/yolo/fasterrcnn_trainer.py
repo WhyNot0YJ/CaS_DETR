@@ -1103,14 +1103,10 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
 
         data_yaml = str(self.data_config.get("data_yaml", ""))
         data_lower = data_yaml.lower()
-        if "vehicle5" in data_lower:
-            dataset = "DAIR-V2X-Vehicle5"
-        elif "dair" in data_lower:
-            dataset = "DAIR-V2X-Vehicle8"
-        elif "vehicle1" in data_lower:
-            dataset = "UA-DETRAC-Vehicle1"
+        if "dair" in data_lower:
+            dataset = "DAIR-V2X"
         elif "uadetrac" in data_lower or "ua-detrac" in data_lower:
-            dataset = "UA-DETRAC-Vehicle4"
+            dataset = "UA-DETRAC"
         else:
             dataset = Path(data_yaml).stem or "unknown"
 

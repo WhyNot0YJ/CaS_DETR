@@ -24,7 +24,6 @@ if str(_experiments_root) not in sys.path:
 
 from common.dataset_registry import load_dataset_registry, find_dataset_profile_by_data_yaml
 from common.dataset_protocol import set_report_protocol
-from common.hierarchical_eval import HIERARCHICAL_EVAL_CHOICES, sha256_file
 from common.model_benchmark import format_benchmark_eval_line
 
 
@@ -71,21 +70,7 @@ def main():
         action="store_true",
         help="Skip diagnostic PyTorch speed timing; TensorRT results are recorded separately.",
     )
-    parser.add_argument(
-        "--hierarchical-eval",
-        choices=HIERARCHICAL_EVAL_CHOICES,
-        default=None,
-        help=(
-            "Keep the framework's native postprocess and collapse category labels only "
-            "for a second COCO evaluation."
-        ),
-    )
     args = parser.parse_args()
-
-    if args.hierarchical_eval == "dairv2x_vehicle8_to_vehicle5":
-        set_report_protocol("dairv2x_vehicle8")
-    elif args.hierarchical_eval == "uadetrac_vehicle4_to_vehicle1":
-        set_report_protocol("uadetrac_vehicle4")
 
     log_dir = Path(args.log_dir).resolve()
     config_yaml = log_dir / "config.yaml"
@@ -96,17 +81,15 @@ def main():
     with config_yaml.open(encoding="utf-8") as fh:
         config = yaml.safe_load(fh) or {}
 
-    if args.hierarchical_eval:
-        datasets = load_dataset_registry(Path(args.dataset_registry))
-        profile = find_dataset_profile_by_data_yaml(
-            datasets, config.get("data", {}).get("data_yaml", "")
-        )
-        coco_root = str((profile or {}).get("coco_data_root", "")).strip()
-        if not coco_root:
-            raise ValueError(
-                "hierarchical evaluation requires coco_data_root in the dataset registry"
-            )
-        config.setdefault("data", {})["coco_data_root"] = coco_root
+    datasets = load_dataset_registry(Path(args.dataset_registry))
+    profile = find_dataset_profile_by_data_yaml(
+        datasets, config.get("data", {}).get("data_yaml", "")
+    )
+    data_yaml = str(config.get("data", {}).get("data_yaml", "")).lower()
+    protocol = str((profile or {}).get("report_protocol", "")).lower()
+    if protocol not in {"dairv2x", "uadetrac"}:
+        protocol = "uadetrac" if "uadetrac" in data_yaml or "ua-detrac" in data_yaml else "dairv2x"
+    set_report_protocol(protocol)
 
     # CaS_DETR / 本仓库 DETR：checkpoint 非 Ultralytics 格式，勿用本脚本
     _m = config.get("model") or {}
@@ -211,28 +194,7 @@ def main():
     # The standalone evaluator bypasses the normal trainer constructor.
     # Keep the shared CSV identity consistent with a regular training run.
     trainer.experiment_name = log_dir.name
-    trainer.hierarchical_eval = args.hierarchical_eval
     trainer.skip_pytorch_benchmark = args.skip_pytorch_benchmark
-
-    if args.hierarchical_eval:
-        expected_classes = (
-            8 if args.hierarchical_eval == "dairv2x_vehicle8_to_vehicle5" else 4
-        )
-        if trainer.num_classes != expected_classes:
-            raise ValueError(
-                f"{args.hierarchical_eval} requires {expected_classes} source classes, "
-                f"but the experiment resolved {trainer.num_classes}"
-            )
-        if is_yolox:
-            checkpoint_path = trainer._resolve_yolox_eval_ckpt()
-        else:
-            checkpoint_path = log_dir / "weights" / "best.pt"
-        if checkpoint_path is None or not Path(checkpoint_path).is_file():
-            raise FileNotFoundError(
-                f"cannot hash hierarchical-eval checkpoint: {checkpoint_path}"
-            )
-        trainer.hierarchical_checkpoint_path = Path(checkpoint_path).resolve()
-        trainer.hierarchical_checkpoint_sha256 = sha256_file(checkpoint_path)
 
     logger.info(f"实验目录: {log_dir}")
     logger.info(f"推理设备: {trainer.misc_config.get('device', 'cpu')}")

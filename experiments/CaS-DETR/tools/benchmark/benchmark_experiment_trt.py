@@ -22,10 +22,8 @@ from common.trt_provenance import (
 
 
 DATASET_NAMES = {
-    "dairv2x_vehicle5": "DAIR-V2X-Vehicle5",
-    "dairv2x_vehicle8": "DAIR-V2X-Vehicle8",
-    "uadetrac_vehicle1": "UA-DETRAC-Vehicle1",
-    "uadetrac_vehicle4": "UA-DETRAC-Vehicle4",
+    "dairv2x": "DAIR-V2X",
+    "uadetrac": "UA-DETRAC",
 }
 
 

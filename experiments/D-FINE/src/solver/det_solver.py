@@ -72,6 +72,8 @@ class DetSolver(BaseSolver):
                 self.use_wandb
             )
             for k in test_stats:
+                if k == "loss":
+                    continue
                 best_stat["epoch"] = self.last_epoch
                 best_stat[k] = test_stats[k][0]
                 top1 = test_stats[k][0]
@@ -138,6 +140,8 @@ class DetSolver(BaseSolver):
 
             # TODO
             for k in test_stats:
+                if k == "loss":
+                    continue
                 if self.writer and dist_utils.is_main_process():
                     for i, v in enumerate(test_stats[k]):
                         self.writer.add_scalar(f"Test/{k}_{i}".format(k), v, epoch)

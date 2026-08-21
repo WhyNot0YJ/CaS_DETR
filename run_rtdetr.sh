@@ -15,6 +15,14 @@ PORT_JUPYTER=8899
 PORT_TENSORBOARD=6007
 SHM_SIZE="4g"
 
+# Resend credentials are inherited only when explicitly set on the host.
+RESEND_ENV=()
+for resend_var in RESEND_API_KEY RESEND_FROM RESEND_TO; do
+  if [[ -n "${!resend_var:-}" ]]; then
+    RESEND_ENV+=(-e "$resend_var")
+  fi
+done
+
 export OMP_NUM_THREADS=1
 
 # 无真实终端时去掉 -t，否则报错：the input device is not a TTY
@@ -55,6 +63,7 @@ fi
 
 exec docker run --gpus all "${DOCKER_TTY[@]}" --name "$NAME" \
   --shm-size="$SHM_SIZE" \
+  "${RESEND_ENV[@]}" \
   "${DOCKER_VOLUMES[@]}" \
   -w "$CONTAINER_WORKDIR" \
   -p "$PORT_JUPYTER:8888" -p "$PORT_TENSORBOARD:6006" \

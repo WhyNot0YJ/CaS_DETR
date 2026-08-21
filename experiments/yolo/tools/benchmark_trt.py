@@ -168,11 +168,11 @@ def main():
     if str(experiments_dir) not in sys.path:
         sys.path.insert(0, str(experiments_dir))
     from common.result_paths import result_csv
-    from common.hierarchical_eval import sha256_file
     from common.trt_provenance import (
         artifact_hash_suffix,
         build_engine_provenance,
         engine_is_reusable,
+        sha256_file,
         write_engine_provenance,
     )
 
