@@ -81,9 +81,11 @@ def coco_area_ap_at_iou50(coco_eval) -> Tuple[float, float, float]:
 def extract_per_category_ap_from_coco_eval(
     coco_eval: Any,
     categories: List[Dict[str, Any]],
+    *,
+    area_index: int = 0,
 ) -> Tuple[Dict[str, float], Dict[str, float]]:
     """
-    从 ``COCOeval.accumulate()`` 后的 ``precision[T,R,K,A,M]`` 提取每类 AP@0.5 与 AP@0.5:0.95。
+    从 ``COCOeval.accumulate()`` 后的 ``precision[T,R,K,A,M]`` 提取一个面积档的每类 AP@0.5 与 AP@0.5:0.95。
 
     Extract per-category AP@0.5 and AP@0.5:0.95 from ``COCOeval`` for shared DETR / YOLO reporting.
     """
@@ -94,7 +96,6 @@ def extract_per_category_ap_from_coco_eval(
 
     try:
         precision = coco_eval.eval["precision"]
-        area_index = 0
         max_det_index = len(coco_eval.params.maxDets) - 1
         cat_id_to_index = {cat_id: idx for idx, cat_id in enumerate(coco_eval.params.catIds)}
 
@@ -312,7 +313,7 @@ def write_eval_csv(
     将一行评估指标写入 CSV。
 
     ``class_names`` 非空时，额外写入 ``AP50_<cls>``（每类 AP@0.5）与 ``AP5095_<cls>``（每类 AP@0.5:0.95）列；
-    对应键名必须为 ``AP50_<cls>``、``AP5095_<cls>``（不再使用 ``mAP_<cls>`` 表示每类指标）。
+    以及 small 面积档的 ``AP_small_50_<cls>``、``AP_small_5095_<cls>`` 列。
 
     ``weather_buckets`` 非空时，额外写入 ``weather_<bucket>_mAP_50``、``weather_<bucket>_mAP_5095`` 列。
     桶名用小写并把空格替换成下划线，与 ``det_engine._build_weather_evaluators`` 一致。
@@ -337,6 +338,8 @@ def write_eval_csv(
             suffix = canonical_category_metric_name(name)
             fieldnames.append(f"AP50_{suffix}")
             fieldnames.append(f"AP5095_{suffix}")
+            fieldnames.append(f"AP_small_50_{suffix}")
+            fieldnames.append(f"AP_small_5095_{suffix}")
     if weather_buckets:
         for bucket in weather_buckets:
             fieldnames.append(f"weather_{bucket}_mAP_50")
@@ -363,6 +366,10 @@ def write_eval_csv(
             v5095 = metrics.get(f"AP5095_{suffix}", metrics.get(f"AP5095_{name}", 0.0))
             row[f"AP50_{suffix}"] = f"{float(v50):.6f}" if isinstance(v50, (int, float)) else str(v50)
             row[f"AP5095_{suffix}"] = f"{float(v5095):.6f}" if isinstance(v5095, (int, float)) else str(v5095)
+            small50 = metrics.get(f"AP_small_50_{suffix}", 0.0)
+            small5095 = metrics.get(f"AP_small_5095_{suffix}", 0.0)
+            row[f"AP_small_50_{suffix}"] = f"{float(small50):.6f}" if isinstance(small50, (int, float)) else str(small50)
+            row[f"AP_small_5095_{suffix}"] = f"{float(small5095):.6f}" if isinstance(small5095, (int, float)) else str(small5095)
 
     if weather_buckets:
         for bucket in weather_buckets:

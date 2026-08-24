@@ -112,6 +112,8 @@ def compute_cas_style_map_metrics(
 
     per_cat_50: Dict[str, float] = {}
     per_cat_5095: Dict[str, float] = {}
+    per_cat_small_50: Dict[str, float] = {}
+    per_cat_small_5095: Dict[str, float] = {}
 
     try:
         coco_eval = _run_coco_eval(
@@ -126,6 +128,9 @@ def compute_cas_style_map_metrics(
         if print_per_category:
             per_cat_50, per_cat_5095 = extract_per_category_ap_from_coco_eval(
                 coco_eval, categories
+            )
+            per_cat_small_50, per_cat_small_5095 = extract_per_category_ap_from_coco_eval(
+                coco_eval, categories, area_index=1
             )
 
         _s = coco_eval.stats
@@ -153,6 +158,8 @@ def compute_cas_style_map_metrics(
             suffix = canonical_category_metric_name(cat_name)
             result[f"AP50_{suffix}"] = per_cat_50.get(cat_name, 0.0)
             result[f"AP5095_{suffix}"] = per_cat_5095[cat_name]
+            result[f"AP_small_50_{suffix}"] = per_cat_small_50.get(cat_name, 0.0)
+            result[f"AP_small_5095_{suffix}"] = per_cat_small_5095.get(cat_name, 0.0)
 
         return result
     except Exception as exc:

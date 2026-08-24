@@ -1021,6 +1021,8 @@ class BaseYOLOTrainer(ABC):
                         suffix = canonical_category_metric_name(nm)
                         metrics[f'AP50_{suffix}'] = 0.0
                         metrics[f'AP5095_{suffix}'] = 0.0
+                        metrics[f'AP_small_50_{suffix}'] = 0.0
+                        metrics[f'AP_small_5095_{suffix}'] = 0.0
                 else:
                     metrics['mAP_50'] = coco_ap_at_iou50_all(coco_eval)
                     metrics['mAP_5095'] = (
@@ -1044,6 +1046,9 @@ class BaseYOLOTrainer(ABC):
                     per_cat_50, per_cat_5095 = extract_per_category_ap_from_coco_eval(
                         coco_eval, categories_coco
                     )
+                    per_cat_small_50, per_cat_small_5095 = extract_per_category_ap_from_coco_eval(
+                        coco_eval, categories_coco, area_index=1
+                    )
                     per_cls_50 = [
                         per_cat_50.get(canonical_category_metric_name(eval_class_names[i]), 0.0)
                         for i in range(eval_nc)
@@ -1057,6 +1062,8 @@ class BaseYOLOTrainer(ABC):
                         suffix = canonical_category_metric_name(nm)
                         metrics[f'AP50_{suffix}'] = per_cat_50.get(suffix, 0.0)
                         metrics[f'AP5095_{suffix}'] = per_cat_5095.get(suffix, 0.0)
+                        metrics[f'AP_small_50_{suffix}'] = per_cat_small_50.get(suffix, 0.0)
+                        metrics[f'AP_small_5095_{suffix}'] = per_cat_small_5095.get(suffix, 0.0)
 
                 weather_log_parts_50 = []
                 weather_log_parts_5095 = []

@@ -468,10 +468,15 @@ def compute_cas_metrics(
     }
 
     per50, per5095 = extract_per_category_ap_from_coco_eval(ce, categories)
+    small50, small5095 = extract_per_category_ap_from_coco_eval(ce, categories, area_index=1)
     for name, v in per50.items():
         metrics[f"AP50_{canonical_category_metric_name(name)}"] = v
     for name, v in per5095.items():
         metrics[f"AP5095_{canonical_category_metric_name(name)}"] = v
+    for name, v in small50.items():
+        metrics[f"AP_small_50_{canonical_category_metric_name(name)}"] = v
+    for name, v in small5095.items():
+        metrics[f"AP_small_5095_{canonical_category_metric_name(name)}"] = v
 
     weather_metrics = compute_weather_subset_metrics(coco_gt, predictions)
     metrics.update(weather_metrics)
