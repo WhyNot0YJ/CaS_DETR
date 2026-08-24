@@ -36,7 +36,7 @@ optimizer:
 
 train_dataloader:
   total_batch_size: 16
-  num_workers: 8
+  num_workers: 12
   pin_memory: False
   dataset:
     transforms:
@@ -47,5 +47,5 @@ train_dataloader:
 
 val_dataloader:
   total_batch_size: 32
-  num_workers: 8
+  num_workers: 12
   pin_memory: False

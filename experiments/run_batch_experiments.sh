@@ -51,7 +51,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数
 #   ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）
-#   ./run_batch_experiments.sh --main                          # 当前主实验：RT-DETR + D-FINE + DEIM + CaS MoE4-1x（两协议）
+#   ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X 最小主实验：DEIM、Sparse、CaS、CaS + PG-MoE
 #   ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2，等价 --rtdetrv2
 #   ./run_batch_experiments.sh --test --rtdetrv2               # 测试模式只跑官方 RT-DETRv2（2 epoch + cas-eval）
 #   ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验（2 epoch smoke test）
@@ -485,16 +485,12 @@ declare -A DFINE_CONFIGS=(
     ["dfine-s-uadetrac"]="D-FINE/configs/dfine/dfine_hgnetv2_s_uadetrac_no_decoder_ffn_pretrain.yml"
 )
 
-# 当前主实验：4 个模型 × DAIR-V2X / UA-DETRAC。
+# DAIR-V2X 最小主实验矩阵：仅逐步打开 Sparse、MoE、PG-MoE。
 declare -a CURRENT_MAIN_EXPERIMENTS=(
-    "${RTDETRV2_ADAPTER_CONFIGS[rtdetrv2-r18-dairv2x]}"
-    "${RTDETRV2_ADAPTER_CONFIGS[rtdetrv2-r18-uadetrac]}"
-    "${DFINE_CONFIGS[dfine-s-dairv2x]}"
-    "${DFINE_CONFIGS[dfine-s-uadetrac]}"
-    "${DEIM_CONFIGS[deim-s-dairv2x]}"
-    "${DEIM_CONFIGS[deim-s-uadetrac]}"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_uadetrac.yml"
+    "DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain.yml"  # DEIM: no Sparse, no MoE
+    "CaS-DETR/configs/deim_dfine/minimal_sparse_hgnetv2_s_dairv2x.yml"  # Sparse only
+    "CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml"  # CaS: Sparse + Vanilla MoE
+    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_hgnetv2_s_dairv2x.yml"  # CaS + PG-MoE
 )
 
 # 构建全部配置列表与名称映射
@@ -789,12 +785,7 @@ parse_arguments() {
     done
 
     if [ "$SCOPE_DAIRV2X" != true ] && [ "$SCOPE_UADETRAC" != true ]; then
-        if [ "$has_main" = true ]; then
-            SCOPE_DAIRV2X=true
-            SCOPE_UADETRAC=true
-        else
-            SCOPE_DAIRV2X=true
-        fi
+        SCOPE_DAIRV2X=true
     fi
     if [ "$SCOPE_DAIRV2X" = true ]; then
         log_info "数据集协议: dairv2x"
@@ -1281,7 +1272,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）"
         echo "  ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数"
         echo "  ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）"
-        echo "  ./run_batch_experiments.sh --main                          # 当前主实验：RT-DETR + D-FINE + DEIM + CaS MoE4-1x（两协议）"
+        echo "  ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X 最小主实验：DEIM、Sparse、CaS、CaS + PG-MoE"
         echo "  ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验"
         echo "  ./run_batch_experiments.sh --test --dqm_detr               # 测试模式：DQM 全部消融+主实验"

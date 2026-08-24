@@ -19,6 +19,14 @@ DFINETransformer:
   moe_top_k: 2
   moe_noise_std: 0.1
   router_init_std: 0.02
+  pg_enabled: False
+  pg_hidden_dim: 32
+  pg_scale: 1.0
+
+moe_analysis:
+  enabled: false
+  output_dir: ''
+  bins: 20
 
 DEIMCriterion:
   decoder_moe_balance_weight: 0.01

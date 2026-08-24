@@ -15,9 +15,11 @@ class MoELayer(nn.Module):
     关键优化：使用批量矩阵运算替代循环，充分利用 GPU 并行计算能力。
     """
     
-    def __init__(self, d_model: int, dim_feedforward: int, num_experts: int = 4, 
-                 top_k: int = 2, dropout: float = 0.1, activation: str = 'gelu', 
-                 noise_std: float = 0.1, router_init_std: float = 0.02):
+    def __init__(self, d_model: int, dim_feedforward: int, num_experts: int = 4,
+                 top_k: int = 2, dropout: float = 0.1, activation: str = 'gelu',
+                 noise_std: float = 0.1, router_init_std: float = 0.02,
+                 pg_enabled: bool = False, pg_hidden_dim: int = 32,
+                 pg_scale: float = 1.0):
         super().__init__()
         self.d_model = d_model
         self.dim_feedforward = dim_feedforward
@@ -25,10 +27,18 @@ class MoELayer(nn.Module):
         self.top_k = min(top_k, num_experts)
         self.noise_std = noise_std
         self.dropout_rate = dropout
+        self.pg_enabled = pg_enabled
+        self.pg_scale = pg_scale
         
         # [修复] 提高初始化 std 并支持配置化
         self.router = nn.Linear(d_model, num_experts, bias=False)
         nn.init.normal_(self.router.weight, mean=0.0, std=router_init_std)
+        if self.pg_enabled:
+            self.spatial_router = nn.Sequential(
+                nn.Linear(2, pg_hidden_dim),
+                nn.SiLU(),
+                nn.Linear(pg_hidden_dim, num_experts),
+            )
         
         # 向量化专家权重：每个专家的两层 MLP
         self.expert_w1 = nn.Parameter(torch.empty(num_experts, dim_feedforward, d_model))
@@ -56,6 +66,7 @@ class MoELayer(nn.Module):
         # [修复] 缓存改为列表，以支持共享层多次 forward 的记录
         self.router_logits_cache = []
         self.expert_indices_cache = []
+        self.reference_points_cache = []
         # Routing statistics are detached; only the scalar auxiliary loss
         # retains the graph until it is consumed after this forward.
         self._balance_loss_cache = []
@@ -64,10 +75,12 @@ class MoELayer(nn.Module):
         """用于在共享层模式下，每个 Batch 开始前清空记录"""
         self.router_logits_cache = []
         self.expert_indices_cache = []
+        self.reference_points_cache = []
         self._balance_loss_cache = []
     
     def forward(self, x: torch.Tensor, spatial_shape: Optional[Tuple[int, int]] = None,
-                dynamic_top_k: Optional[int] = None) -> torch.Tensor:
+                dynamic_top_k: Optional[int] = None,
+                reference_points: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Memory-Efficient Token-Grouping MoE - Scales with Token Count, not Weight-Token Product.
         Optimized to prevent OOM on large batches.
@@ -84,6 +97,10 @@ class MoELayer(nn.Module):
         
         # 1. Router Logic
         router_logits = self.router(x)  # [B, N, E]
+        if self.pg_enabled:
+            if reference_points is None:
+                raise ValueError('PG-MoE requires normalized decoder reference points.')
+            router_logits = router_logits + self.pg_scale * self.spatial_router(reference_points[..., :2])
         # [修复] Noisy Top-K: 仅在训练阶段加入探索噪声
         if self.training and self.noise_std > 0:
             noise = torch.randn_like(router_logits) * self.noise_std
@@ -115,6 +132,7 @@ class MoELayer(nn.Module):
             # raise the peak memory substantially on large token batches.
             self.router_logits_cache.append(router_logits.detach().reshape(-1, E))
             self.expert_indices_cache.append(expert_indices.detach().reshape(-1, K))
+            self.reference_points_cache.append(reference_points.detach()[..., :2] if reference_points is not None else None)
 
         x_flat = x.view(-1, C)
         flat_expert_indices = expert_indices.view(-1, K)
@@ -151,6 +169,14 @@ class MoELayer(nn.Module):
             out_flat.index_add_(0, token_indices, temp_out * weights)
             
         return out_flat.view(B, N, C)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        if self.pg_enabled:
+            for name, tensor in self.spatial_router.state_dict().items():
+                state_dict.setdefault(prefix + 'spatial_router.' + name, tensor)
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
 
 # =========================================================================

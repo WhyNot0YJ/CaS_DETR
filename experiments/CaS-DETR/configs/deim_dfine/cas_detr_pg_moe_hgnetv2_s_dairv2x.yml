@@ -1,0 +1,10 @@
+__include__: [
+  './minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml'
+]
+
+output_dir: ./outputs/dairv2x/cas_detr_pg_moe_hgnetv2_s
+
+DFINETransformer:
+  pg_enabled: True
+  pg_hidden_dim: 32
+  pg_scale: 1.0

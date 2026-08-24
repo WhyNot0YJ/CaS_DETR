@@ -19,6 +19,7 @@ import os
 import sys
 import json
 import argparse
+import csv
 import gc
 import logging
 from pathlib import Path
@@ -62,7 +63,7 @@ class RouterStatsCollector:
         self.keep_ratio_sum = 0.0
         self.keep_ratio_count = 0
 
-    def update(self, model, outputs):
+    def update(self, model, outputs, reset_cache=True):
         encoder_info = outputs.get("encoder_info", {}) if isinstance(outputs, dict) else {}
         ratio = encoder_info.get("dynamic_keep_ratio")
         if isinstance(ratio, torch.Tensor):
@@ -97,7 +98,7 @@ class RouterStatsCollector:
                 # Router diagnostics are per-forward data. Do not retain the
                 # previous batch's GPU tensors while evaluating the next one.
                 reset = getattr(module, "reset_cache", None)
-                if callable(reset):
+                if reset_cache and callable(reset):
                     reset()
 
     def to_dict(self):
@@ -125,6 +126,135 @@ class RouterStatsCollector:
             ),
             "layers": layers,
         }
+
+
+class RoutingAnalysisCollector:
+    """Stream eval-only per-query MoE routes and spatial expert histograms."""
+
+    def __init__(self, output_dir: Path, matcher, bins: int = 20):
+        self.output_dir = output_dir
+        self.matcher = matcher
+        self.bins = bins
+        self.split = ''
+        self.writer = None
+        self.handle = None
+        self.histograms = {}
+
+    def set_split(self, split: str):
+        self.split = split
+
+    def _open(self, num_experts: int):
+        if self.writer is not None:
+            return
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        fields = [
+            'split', 'image_id', 'query_id', 'decoder_layer', 'reference_x',
+            'reference_y', 'expert_1', 'expert_2', 'matched',
+        ] + [f'prob_e{i}' for i in range(num_experts)]
+        self.handle = (self.output_dir / 'moe_routing_records.csv').open(
+            'w', newline='', encoding='utf-8')
+        self.writer = csv.DictWriter(self.handle, fieldnames=fields)
+        self.writer.writeheader()
+        zeros = np.zeros((self.bins, self.bins), dtype=np.int64)
+        self.histograms = {
+            group: [zeros.copy() for _ in range(num_experts)]
+            for group in ('all_queries', 'matched_queries')
+        }
+
+    def update(self, model, outputs, targets):
+        indices = self.matcher({
+            'pred_logits': outputs['pred_logits'], 'pred_boxes': outputs['pred_boxes'],
+        }, targets)['indices']
+        matched = [set(src.cpu().tolist()) for src, _ in indices]
+
+        for name, module in _unwrap_module(model).named_modules():
+            logits_cache = getattr(module, 'router_logits_cache', None)
+            indices_cache = getattr(module, 'expert_indices_cache', None)
+            refs_cache = getattr(module, 'reference_points_cache', None)
+            if not logits_cache or not indices_cache or not refs_cache:
+                continue
+            try:
+                num_experts = int(module.num_experts)
+                self._open(num_experts)
+                layer_id = name.split('decoder.layers.', 1)[-1].split('.', 1)[0]
+                for logits, expert_indices, refs in zip(logits_cache, indices_cache, refs_cache):
+                    if refs is None:
+                        continue
+                    batch_size, num_queries = refs.shape[:2]
+                    probs = torch.softmax(logits.float(), dim=-1).reshape(
+                        batch_size, num_queries, num_experts).cpu().numpy()
+                    selected = expert_indices.reshape(batch_size, num_queries, -1).cpu().numpy()
+                    points = refs.float().cpu().numpy()
+                    for batch_index in range(batch_size):
+                        image_id = int(targets[batch_index]['image_id'].flatten()[0].item())
+                        positive = np.fromiter(
+                            (query_id in matched[batch_index] for query_id in range(num_queries)),
+                            dtype=bool, count=num_queries)
+                        rows = []
+                        for query_id in range(num_queries):
+                            row = {
+                                'split': self.split,
+                                'image_id': image_id,
+                                'query_id': query_id,
+                                'decoder_layer': layer_id,
+                                'reference_x': float(points[batch_index, query_id, 0]),
+                                'reference_y': float(points[batch_index, query_id, 1]),
+                                'expert_1': int(selected[batch_index, query_id, 0]),
+                                'expert_2': int(selected[batch_index, query_id, 1]),
+                                'matched': int(positive[query_id]),
+                            }
+                            row.update({
+                                f'prob_e{expert_id}': float(probs[batch_index, query_id, expert_id])
+                                for expert_id in range(num_experts)
+                            })
+                            rows.append(row)
+                        self.writer.writerows(rows)
+                        for group, mask in (
+                            ('all_queries', np.ones(num_queries, dtype=bool)),
+                            ('matched_queries', positive),
+                        ):
+                            for expert_id in range(num_experts):
+                                expert_mask = mask & (selected[batch_index] == expert_id).any(axis=-1)
+                                if expert_mask.any():
+                                    hist, _, _ = np.histogram2d(
+                                        points[batch_index, expert_mask, 1],
+                                        points[batch_index, expert_mask, 0],
+                                        bins=self.bins, range=((0, 1), (0, 1)),
+                                    )
+                                    self.histograms[group][expert_id] += hist.astype(np.int64)
+            finally:
+                reset = getattr(module, 'reset_cache', None)
+                if callable(reset):
+                    reset()
+
+    def finish(self):
+        if self.handle is None:
+            LOG.warning('MoE analysis requested, but no evaluation MoE routes were observed.')
+            return
+        self.handle.close()
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except ImportError:
+            LOG.warning('Wrote routing CSV but skipped heatmaps because matplotlib is unavailable.')
+            return
+        for group, expert_hists in self.histograms.items():
+            group_dir = self.output_dir / group
+            group_dir.mkdir(parents=True, exist_ok=True)
+            vmax = max(1, max(int(hist.max()) for hist in expert_hists))
+            for expert_id, hist in enumerate(expert_hists):
+                fig, axis = plt.subplots(figsize=(5, 4))
+                image = axis.imshow(
+                    hist, cmap='magma', vmin=0, vmax=vmax,
+                    extent=(0, 1, 1, 0), origin='upper', aspect='auto')
+                axis.set(xlabel='reference x', ylabel='reference y',
+                         title=f'Expert {expert_id} ({group})')
+                fig.colorbar(image, ax=axis, label='Top-2 query count')
+                fig.tight_layout()
+                fig.savefig(group_dir / f'expert_{expert_id}.png', dpi=160)
+                plt.close(fig)
+        LOG.info('Wrote MoE routing analysis to %s', self.output_dir)
 
 def _unwrap_module(m: Any) -> Any:
     return m.module if hasattr(m, "module") else m
@@ -362,6 +492,7 @@ def collect_predictions(
     remap_mscoco_category: bool = False,
     label2category=None,
     router_stats=None,
+    routing_analysis=None,
 ) -> List[Dict]:
     """Run inference and return predictions in COCO detection format."""
     model.eval()
@@ -376,7 +507,9 @@ def collect_predictions(
 
         outputs = model(samples)
         if router_stats is not None:
-            router_stats.update(model, outputs)
+            router_stats.update(model, outputs, reset_cache=routing_analysis is None)
+        if routing_analysis is not None:
+            routing_analysis.update(model, outputs, targets)
         orig_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessor(outputs, orig_sizes)
 
@@ -846,6 +979,18 @@ def main():
 
     # Write CSV
     output_dir = Path(cfg.yaml_cfg.get("output_dir", "./outputs"))
+    analysis_cfg = yaml_cfg.get('moe_analysis', {}) or {}
+    routing_analysis = None
+    if analysis_cfg.get('enabled', False):
+        analysis_dir = analysis_cfg.get('output_dir')
+        analysis_dir = (
+            Path(analysis_dir) if Path(analysis_dir).is_absolute()
+            else (EXPERIMENTS_DIR.parent / analysis_dir).resolve()
+        ) if analysis_dir else output_dir / 'moe_analysis'
+        bins = int(analysis_cfg.get('bins', 20))
+        if bins <= 0:
+            raise ValueError('moe_analysis.bins must be positive.')
+        routing_analysis = RoutingAnalysisCollector(analysis_dir, solver.criterion.matcher, bins)
     csv_path = Path(args.output_csv) if args.output_csv else result_csv("eval_metrics")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     split_names = [s.strip() for s in args.splits.split(",") if s.strip()]
@@ -896,6 +1041,8 @@ def main():
 
         l2c = _dataset_label2category_map(data_loader)
         LOG.info("Running inference on %s set ...", split_name)
+        if routing_analysis is not None:
+            routing_analysis.set_split(split_name)
         preds = collect_predictions(
             model,
             solver.postprocessor,
@@ -904,6 +1051,7 @@ def main():
             remap_mscoco_category=remap_mscoco,
             label2category=l2c,
             router_stats=router_stats,
+            routing_analysis=routing_analysis,
         )
         LOG.info("Collected %d predictions for %s", len(preds), split_name)
         predictions_dir = Path(args.predictions_dir) if args.predictions_dir else output_dir
@@ -956,6 +1104,9 @@ def main():
         router_path.parent.mkdir(parents=True, exist_ok=True)
         router_path.write_text(json.dumps(router_stats.to_dict(), indent=2), encoding="utf-8")
         LOG.info("Wrote %s", router_path)
+
+    if routing_analysis is not None:
+        routing_analysis.finish()
 
     cd_wrote = _maybe_run_cross_domain_csv_row(
         cfg=cfg,

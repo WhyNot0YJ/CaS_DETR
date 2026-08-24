@@ -162,7 +162,10 @@ class TransformerDecoderLayer(nn.Module):
                  num_experts=4,
                  moe_top_k=2,
                  moe_noise_std=0.1,
-                 router_init_std=0.02):
+                 router_init_std=0.02,
+                 pg_enabled=False,
+                 pg_hidden_dim=32,
+                 pg_scale=1.0):
         super(TransformerDecoderLayer, self).__init__()
         if layer_scale is not None:
             dim_feedforward = round(layer_scale * dim_feedforward)
@@ -193,6 +196,9 @@ class TransformerDecoderLayer(nn.Module):
                 activation=activation,
                 noise_std=moe_noise_std,
                 router_init_std=router_init_std,
+                pg_enabled=pg_enabled,
+                pg_hidden_dim=pg_hidden_dim,
+                pg_scale=pg_scale,
             )
         else:
             self.linear1 = nn.Linear(d_model, dim_feedforward)
@@ -212,9 +218,9 @@ class TransformerDecoderLayer(nn.Module):
     def with_pos_embed(self, tensor, pos):
         return tensor if pos is None else tensor + pos
 
-    def forward_ffn(self, tgt):
+    def forward_ffn(self, tgt, reference_points=None):
         if self.use_moe:
-            return self.decoder_moe_layer(tgt)
+            return self.decoder_moe_layer(tgt, reference_points=reference_points)
         return self.linear2(self.dropout3(self.activation(self.linear1(tgt))))
 
     def forward(self,
@@ -242,7 +248,7 @@ class TransformerDecoderLayer(nn.Module):
         target = self.gateway(target, self.dropout2(target2))
 
         # ffn
-        target2 = self.forward_ffn(target)
+        target2 = self.forward_ffn(target, reference_points[..., 0, :])
         target = target + self.dropout4(target2)
         target = self.norm3(target.clamp(min=-65504, max=65504))
 
@@ -474,6 +480,9 @@ class DFINETransformer(nn.Module):
                  moe_top_k=2,
                  moe_noise_std=0.1,
                  router_init_std=0.02,
+                 pg_enabled=False,
+                 pg_hidden_dim=32,
+                 pg_scale=1.0,
                  moe_layer_indices=None,
                  dense_dim_feedforward=None,
                  moe_dim_feedforward=None,
@@ -532,22 +541,26 @@ class DFINETransformer(nn.Module):
         decoder_layer = TransformerDecoderLayer(hidden_dim, nhead, base_ffn_dim, dropout, \
             activation, num_levels, num_points, cross_attn_method=cross_attn_method,
             use_moe=use_moe and not layerwise_moe, num_experts=num_experts, moe_top_k=moe_top_k,
-            moe_noise_std=moe_noise_std, router_init_std=router_init_std)
+            moe_noise_std=moe_noise_std, router_init_std=router_init_std,
+            pg_enabled=pg_enabled, pg_hidden_dim=pg_hidden_dim, pg_scale=pg_scale)
         decoder_layer_wide = TransformerDecoderLayer(hidden_dim, nhead, base_ffn_dim, dropout, \
             activation, num_levels, num_points, cross_attn_method=cross_attn_method, layer_scale=layer_scale,
             use_moe=use_moe and not layerwise_moe, num_experts=num_experts, moe_top_k=moe_top_k,
-            moe_noise_std=moe_noise_std, router_init_std=router_init_std)
+            moe_noise_std=moe_noise_std, router_init_std=router_init_std,
+            pg_enabled=pg_enabled, pg_hidden_dim=pg_hidden_dim, pg_scale=pg_scale)
         self.decoder = TransformerDecoder(hidden_dim, decoder_layer, decoder_layer_wide, num_layers, nhead,
                                           reg_max, self.reg_scale, self.up, eval_idx, layer_scale, act=activation)
         if layerwise_moe:
             moe_layer = TransformerDecoderLayer(hidden_dim, nhead, moe_ffn_dim, dropout, \
                 activation, num_levels, num_points, cross_attn_method=cross_attn_method,
                 use_moe=True, num_experts=num_experts, moe_top_k=moe_top_k,
-                moe_noise_std=moe_noise_std, router_init_std=router_init_std)
+                moe_noise_std=moe_noise_std, router_init_std=router_init_std,
+                pg_enabled=pg_enabled, pg_hidden_dim=pg_hidden_dim, pg_scale=pg_scale)
             moe_layer_wide = TransformerDecoderLayer(hidden_dim, nhead, moe_ffn_dim, dropout, \
                 activation, num_levels, num_points, cross_attn_method=cross_attn_method, layer_scale=layer_scale,
                 use_moe=True, num_experts=num_experts, moe_top_k=moe_top_k,
-                moe_noise_std=moe_noise_std, router_init_std=router_init_std)
+                moe_noise_std=moe_noise_std, router_init_std=router_init_std,
+                pg_enabled=pg_enabled, pg_hidden_dim=pg_hidden_dim, pg_scale=pg_scale)
             for index in self.moe_layer_indices:
                 template = moe_layer_wide if index > self.decoder.eval_idx else moe_layer
                 self.decoder.layers[index] = copy.deepcopy(template)

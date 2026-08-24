@@ -1,0 +1,15 @@
+__include__: [
+  './deim_hgnetv2_s_uadetrac.yml',
+  '../base/cas_deim.yml'
+]
+
+output_dir: ./outputs/uadetrac/cas_detr_pg_moe_hgnetv2_s
+
+DFINETransformer:
+  use_moe: True
+  num_experts: 4
+  moe_top_k: 2
+  dim_feedforward: 128
+  pg_enabled: True
+  pg_hidden_dim: 32
+  pg_scale: 1.0

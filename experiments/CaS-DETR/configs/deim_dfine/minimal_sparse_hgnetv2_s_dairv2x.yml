@@ -1,0 +1,13 @@
+__include__: [
+  './deim_hgnetv2_s_dairv2x.yml',
+  '../base/cas_deim.yml'
+]
+
+output_dir: ./outputs/dairv2x/minimal_sparse_hgnetv2_s
+
+DFINETransformer:
+  use_moe: False
+  moe_layer_indices: null
+
+DEIMCriterion:
+  decoder_moe_balance_weight: 0.0

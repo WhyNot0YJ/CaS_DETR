@@ -14,7 +14,7 @@ warmup_iter: 500
 
 train_dataloader:
   total_batch_size: 16
-  num_workers: 8
+  num_workers: 12
   dataset:
     transforms:
       policy:
@@ -27,4 +27,4 @@ train_dataloader:
 
 val_dataloader:
   total_batch_size: 16
-  num_workers: 8
+  num_workers: 12
