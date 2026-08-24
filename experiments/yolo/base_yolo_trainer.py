@@ -518,7 +518,7 @@ class BaseYOLOTrainer(ABC):
         self, data_cfg: dict, root: Path
     ) -> List[Tuple[str, List[Path], Optional[Path], Optional[Path]]]:
         """
-        返回 [(split, image_dirs, labels_meta_dir, coco_ann_file), ...]，顺序 **val → test**。
+        返回 [(split, image_dirs, labels_meta_dir, coco_ann_file), ...]。
         对应目录须存在，且 labels_meta 下有 JSON 或配置了 ``{split}_coco_ann``。
         """
         eval_test = self.data_config.get('eval_test_after_training', True)
@@ -529,13 +529,15 @@ class BaseYOLOTrainer(ABC):
         )
         lm_val = self._resolve_labels_meta_dir(data_cfg, root, 'val')
         val_ann = self._resolve_coco_ann_file(data_cfg, root, 'val')
+        primary_dir_names = {path.name for path in val_img_dirs}
+        primary_split = 'eval' if 'eval' in primary_dir_names else ('test' if 'test' in primary_dir_names else 'val')
         if (lm_val.is_dir() and any(lm_val.glob('*.json'))) or (
             val_ann is not None and val_ann.is_file()
         ):
-            out.append(('val', val_img_dirs, lm_val, val_ann))
+            out.append((primary_split, val_img_dirs, lm_val, val_ann))
 
         test_rel = str(data_cfg.get('test', '')).strip()
-        if eval_test and test_rel:
+        if eval_test and test_rel and primary_split != 'test':
             test_dirs = self._resolve_eval_image_dirs(data_cfg.get('test', ''), root)
             lm_test = self._resolve_labels_meta_dir(data_cfg, root, 'test')
             test_ann = self._resolve_coco_ann_file(data_cfg, root, 'test')

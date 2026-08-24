@@ -22,11 +22,13 @@ PROTOCOL_SPECS = {
         "dataset": "dairv2x",
         "root": Path("/root/autodl-fs/datasets/DAIR-V2X"),
         "num_classes": 8,
+        "eval_split": "eval",
     },
     "uadetrac": {
         "dataset": "uadetrac",
         "root": Path("/root/autodl-fs/datasets/UA-DETRAC_COCO"),
         "num_classes": 4,
+        "eval_split": "test",
     },
 }
 
@@ -134,7 +136,7 @@ def _dataset_update(
 ) -> Dict[str, Any]:
     if rtdetr_layout:
         img_folder = root if dataset == "dairv2x" else root / split
-        return {"data_root": str(root), "img_folder": str(img_folder)}
+        return {"data_root": str(root), "img_folder": str(img_folder), "split": split}
     img_folder = root if dataset == "dairv2x" else root / split
     return {
         "img_folder": str(img_folder),
@@ -172,7 +174,7 @@ def apply_detr_protocol_overrides(
             },
             "val_dataloader": {
                 "dataset": _dataset_update(
-                    root, dataset, "val", rtdetr_layout=rtdetr_layout
+                    root, dataset, spec["eval_split"], rtdetr_layout=rtdetr_layout
                 )
             },
         },

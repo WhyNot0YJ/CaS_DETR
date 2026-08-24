@@ -83,6 +83,8 @@ def _metrics_from_row(row: Mapping[str, object]) -> Dict[str, float]:
             "map50",
             "map_50",
             "map_0_5",
+            "m_ap_50",
+            "m_ap_0_5",
             "metrics_map50_b",
             "metrics_map50",
             "val_map_50",
@@ -93,6 +95,8 @@ def _metrics_from_row(row: Mapping[str, object]) -> Dict[str, float]:
             "map5095",
             "map_5095",
             "map_0_5_0_95",
+            "m_ap_5095",
+            "m_ap_0_5_0_95",
             "metrics_map50_95_b",
             "metrics_map50_95",
             "val_map_50_95",
@@ -130,8 +134,9 @@ def _metrics_from_row(row: Mapping[str, object]) -> Dict[str, float]:
 def _read_csv_metrics(
     path: Path,
     *,
-    run_id: Optional[str] = None,
+    run_ids: Sequence[str] = (),
     require_run_id: bool = False,
+    prefer_eval_split: Optional[str] = None,
 ) -> Dict[str, float]:
     if not path.is_file() or not path.stat().st_size:
         return {}
@@ -140,12 +145,20 @@ def _read_csv_metrics(
             rows = list(csv.DictReader(handle))
     except (OSError, UnicodeError, csv.Error):
         return {}
-    if run_id:
-        matching = [row for row in rows if str(row.get("run_id", "")) == run_id]
+    candidate_ids = {str(value) for value in run_ids if value}
+    if candidate_ids:
+        matching = [row for row in rows if str(row.get("run_id", "")) in candidate_ids]
         if matching:
             rows = matching
         elif require_run_id:
             return {}
+    if prefer_eval_split:
+        preferred = [
+            row for row in rows
+            if str(row.get("eval_split", "")).lower() == prefer_eval_split.lower()
+        ]
+        if preferred:
+            rows = preferred
     return _metrics_from_row(rows[-1]) if rows else {}
 
 
@@ -220,10 +233,16 @@ def collect_training_metrics(output_dir: Optional[Path | str]) -> Tuple[Dict[str
         report_csv = Path(report_root).expanduser() / "eval_metrics.csv"
     else:
         report_csv = Path(__file__).resolve().parents[1] / "reports" / protocol / "eval_metrics.csv"
-    report_values = _read_csv_metrics(report_csv, run_id=output.name, require_run_id=True)
+    official_eval_split = "test" if protocol == "uadetrac" else "eval"
+    report_values = _read_csv_metrics(
+        report_csv,
+        run_ids=(output.name, f"{output.parent.name}/{output.name}"),
+        require_run_id=True,
+        prefer_eval_split=official_eval_split,
+    )
     if report_values:
         metrics.update(report_values)
-        source.append(str(report_csv))
+        source.append(f"{report_csv} ({official_eval_split})")
     return metrics, ", ".join(dict.fromkeys(source))
 
 
@@ -477,14 +496,15 @@ def _is_primary_process() -> bool:
     return True
 
 
-def _result_info(result: object) -> Tuple[Optional[Path], Dict[str, float]]:
+def _result_info(result: object) -> Tuple[Optional[Path], Dict[str, float], str]:
     if not isinstance(result, Mapping):
-        return None, {}
+        return None, {}, ""
     output = result.get("output_dir")
     output_path = Path(str(output)).expanduser() if output else None
     raw_metrics = result.get("metrics") or {}
-    metrics = dict(raw_metrics) if isinstance(raw_metrics, Mapping) else {}
-    return output_path, {key: value for key, value in metrics.items() if _as_metric(value) is not None}
+    metrics = _metrics_from_row(raw_metrics) if isinstance(raw_metrics, Mapping) else {}
+    source = str(result.get("metric_source", ""))
+    return output_path, metrics, source
 
 
 def run_with_training_notification(
@@ -521,10 +541,14 @@ def run_with_training_notification(
             )
         raise
 
-    result_output, result_metrics = _result_info(result)
+    if os.environ.get("TRAIN_NOTIFY_DEFER_SUCCESS", "").strip().lower() in {"1", "true", "yes", "on"}:
+        print("[train-notify] success deferred to post-training evaluation", flush=True)
+        return result
+    result_output, result_metrics, result_source = _result_info(result)
     resolved_output = result_output or (Path(output_dir) if output_dir else None)
     collected, source = collect_training_metrics(resolved_output)
     metrics = {**collected, **result_metrics}
+    source = result_source or source
     report_plots = _generate_report_images(resolved_output, metrics)
     attachments = _select_attachments(resolved_output, report_plots)
     elapsed = time.monotonic() - started
@@ -549,12 +573,19 @@ def run_with_training_notification(
     return result
 
 
-def notify_training_entry(framework: str) -> Callable:
+def notify_training_entry(
+    framework: str,
+    *,
+    enabled_env: Optional[str] = None,
+    framework_from_cli: bool = False,
+) -> Callable:
     """Decorate a CLI ``main`` and notify without changing its exception behavior."""
 
     def decorator(function: Callable) -> Callable:
         @functools.wraps(function)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
+            if enabled_env and os.environ.get(enabled_env, "").strip().lower() not in {"1", "true", "yes", "on"}:
+                return function(*args, **kwargs)
             arg_object = args[0] if args else None
             config_path = getattr(arg_object, "config", None)
             output_dir = getattr(arg_object, "output_dir", None)
@@ -571,13 +602,32 @@ def notify_training_entry(framework: str) -> Callable:
                 if token == "--test-only":
                     test_only = True
 
+            framework_label = framework
+            if framework_from_cli:
+                framework_names = {
+                    "casdeim": "CaS-DETR",
+                    "deim": "DEIM",
+                    "dfine": "D-FINE",
+                    "dqmdeim": "DQM-DETR",
+                }
+                for index, token in enumerate(argv[:-1]):
+                    if token == "--framework":
+                        framework_label = framework_names.get(argv[index + 1], framework_label)
+                        break
+
             stem = Path(str(config_path)).stem if config_path else "training"
-            experiment = f"{framework}/{stem}"
+            experiment = f"{framework_label}/{stem}"
+            split_tokens = " ".join(argv)
+            is_official_eval = any(
+                token in split_tokens
+                for token in ("--splits test", "--splits=test", "--splits eval", "--splits=eval")
+            )
+            mode = "训练后正式评测" if is_official_eval else ("验证" if test_only else "训练")
             return run_with_training_notification(
                 lambda: function(*args, **kwargs),
                 experiment=experiment,
                 config_path=str(config_path) if config_path else None,
-                mode="验证" if test_only else "训练",
+                mode=mode,
                 output_dir=output_dir,
             )
 

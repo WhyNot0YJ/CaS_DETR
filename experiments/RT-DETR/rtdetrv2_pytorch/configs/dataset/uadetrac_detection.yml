@@ -27,7 +27,7 @@ val_dataloader:
   dataset:
     type: AutoCocoDetection
     data_root: /root/autodl-fs/datasets/UA-DETRAC_COCO
-    split: val
+    split: test
     return_masks: False
   shuffle: False
   num_workers: 12

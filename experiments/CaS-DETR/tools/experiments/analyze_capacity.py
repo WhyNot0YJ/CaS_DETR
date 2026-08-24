@@ -82,9 +82,16 @@ def write_csv(path, rows):
 
 
 def metric_row(path):
-    rows = [row for row in read_rows(path) if row.get("eval_split") == "val"]
+    rows = [
+        row for row in read_rows(path)
+        if row.get("eval_split") == (
+            "test" if "ua-detrac" in str(row.get("dataset", "")).lower()
+            or "uadetrac" in str(row.get("training_taxonomy", "")).lower()
+            else "eval"
+        )
+    ]
     if len(rows) != 1:
-        raise ValueError(f"expected one val row in {path}, found {len(rows)}")
+        raise ValueError(f"expected one official eval row in {path}, found {len(rows)}")
     return rows[0]
 
 

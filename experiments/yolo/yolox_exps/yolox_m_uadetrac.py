@@ -12,4 +12,6 @@ class Exp(CasYoloxExp):
         self.depth = 0.67
         self.width = 0.75
         self.num_classes = 1
+        self.val_ann = "instances_test.json"
+        self.test_ann = "instances_test.json"
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]

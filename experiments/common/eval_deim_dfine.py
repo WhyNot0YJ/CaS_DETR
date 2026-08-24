@@ -44,6 +44,7 @@ from common.det_eval_metrics import (
 from common.detr_eval_utils import log_detr_eval_summary, run_detr_benchmark
 from common.result_paths import result_csv, run_metadata
 from common.dataset_protocol import apply_detr_protocol_overrides
+from common.train_notifications import notify_training_entry
 
 logging.basicConfig(
     level=logging.INFO,
@@ -637,6 +638,11 @@ def _find_best_checkpoint(output_dir: str) -> Optional[str]:
     return None
 
 
+@notify_training_entry(
+    "正式评测",
+    enabled_env="TRAIN_NOTIFY_FINAL_EVAL",
+    framework_from_cli=True,
+)
 def main():
     parser = argparse.ArgumentParser(description="CaS-compatible eval for DEIM / CaS-DETR / DQM-DETR / D-FINE")
     parser.add_argument("--framework", required=True, choices=["deim", "casdeim", "dqmdeim", "dfine"],
@@ -838,12 +844,28 @@ def main():
     csv_path = Path(args.output_csv) if args.output_csv else result_csv("eval_metrics")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     split_names = [s.strip() for s in args.splits.split(",") if s.strip()]
+    primary_ann = str(
+        cfg.yaml_cfg.get("val_dataloader", {}).get("dataset", {}).get("ann_file", "")
+    )
+    primary_name = Path(primary_ann).name
+    primary_split = (
+        "eval" if primary_name == "instances_eval.json"
+        else "test" if primary_name == "instances_test.json"
+        else "val"
+    )
+    seen_splits: set[str] = set()
     append_csv = csv_path.exists()
     wrote_any = False
+    test_metrics: Dict[str, Any] = {}
     router_stats = RouterStatsCollector() if args.router_stats else None
 
     for split_name in split_names:
-        if split_name == "val":
+        if split_name == "val" and primary_split != "val":
+            split_name = primary_split
+        if split_name in seen_splits:
+            continue
+        seen_splits.add(split_name)
+        if split_name in {"val", "eval"}:
             data_loader = solver.val_dataloader
             split_cfg = cfg.yaml_cfg.get("val_dataloader", {}).get("dataset", {})
             ann_file = split_cfg.get("ann_file", "")
@@ -911,6 +933,8 @@ def main():
         )
         append_csv = True
         wrote_any = True
+        if split_name == "test":
+            test_metrics = metrics
 
         # Top-300 DETR prediction lists are large. Release each split before
         # constructing the next DataLoader.
@@ -948,6 +972,13 @@ def main():
         _set_caip_eval_keep_ratio(model, float(restore_keep_ratio.get("prev")))
 
     os.chdir(saved_cwd)
+    if os.environ.get("TRAIN_NOTIFY_FINAL_EVAL", "").strip().lower() in {"1", "true", "yes", "on"} and not test_metrics:
+        raise RuntimeError("训练后 test 评测未产生指标，未发送成功通知")
+    return {
+        "output_dir": str(output_dir.resolve()),
+        "metrics": test_metrics,
+        "metric_source": f"{csv_path} (test)",
+    }
 
 
 if __name__ == "__main__":

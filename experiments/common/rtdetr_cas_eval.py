@@ -305,6 +305,8 @@ def build_test_dataloader_if_available(cfg) -> Optional[Any]:
 
     y0 = cfg.yaml_cfg
     ds_cfg = y0.get("val_dataloader", {}).get("dataset", {})
+    if ds_cfg.get("split") in {"test", "eval"}:
+        return None
     root = Path(str(ds_cfg.get("data_root", "")))
     ann = root / "annotations" / "instances_test.json"
     if not ann.is_file():
@@ -376,6 +378,10 @@ def run_rtdetr_cas_style_eval_after_fit(
     val_loader = solver.val_dataloader
     val_ds = val_loader.dataset
     cats = categories_from_dataset(val_ds)
+    eval_dataset = yaml_cfg.get("val_dataloader", {}).get("dataset", {})
+    eval_split = str(eval_dataset.get("split", "val"))
+    if eval_split not in {"eval", "test"}:
+        eval_split = "val"
 
     preds, gts, id2sz, ih, iw = collect_rtdetr_predictions_and_targets(
         module,
@@ -388,7 +394,7 @@ def run_rtdetr_cas_style_eval_after_fit(
     class_names = [str(c["name"]) for c in cats]
 
     if len(gts) == 0:
-        logger.warning("val 上无 GT，跳过 CaS 风格评估")
+        logger.warning("%s 上无 GT，跳过 CaS 风格评估", eval_split)
         return
 
     metrics = compute_cas_style_map_metrics(
@@ -401,12 +407,12 @@ def run_rtdetr_cas_style_eval_after_fit(
         print_per_category=True,
     )
 
-    log_detr_eval_summary(logger, "val", metrics, bench_dict)
+    log_detr_eval_summary(logger, eval_split, metrics, bench_dict)
     csv_path = write_detr_eval_csv(
         out,
         cfg_stub,
         experiment_name,
-        "val",
+        eval_split,
         metrics,
         class_names,
         bench_dict,
@@ -419,7 +425,7 @@ def run_rtdetr_cas_style_eval_after_fit(
             seed=getattr(cfg, "seed", ""),
         ),
     )
-    logger.info("✓ best_model [val] 评估完成 → %s", csv_path)
+    logger.info("✓ best_model [%s] 评估完成 → %s", eval_split, csv_path)
 
     test_loader = build_test_dataloader_if_available(cfg)
     if test_loader is None:

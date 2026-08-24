@@ -33,6 +33,7 @@ class DatasetProtocolTest(unittest.TestCase):
         self.assertEqual(protocol, "dairv2x")
         self.assertEqual(update["num_classes"], 8)
         self.assertIn("/DAIR-V2X/annotations/", update["train_dataloader"]["dataset"]["ann_file"])
+        self.assertTrue(update["val_dataloader"]["dataset"]["ann_file"].endswith("instances_eval.json"))
         self.assertEqual(
             update["output_dir"],
             "./outputs/dairv2x/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x",
@@ -50,12 +51,26 @@ class DatasetProtocolTest(unittest.TestCase):
                 "UA-DETRAC_COCO",
                 update["val_dataloader"]["dataset"]["ann_file"],
             )
+            self.assertTrue(
+                update["val_dataloader"]["dataset"]["ann_file"].endswith("instances_test.json")
+            )
             self.assertIn("./outputs/uadetrac/", protocol_output_dir(CAS_UA, None))
         finally:
             if previous is None:
                 os.environ.pop("EXPERIMENT_DATASET_PROTOCOL", None)
             else:
                 os.environ["EXPERIMENT_DATASET_PROTOCOL"] = previous
+
+    def test_rtdetr_uses_the_protocol_eval_split(self):
+        update = {}
+        apply_detr_protocol_overrides(update, CAS_UA, None, rtdetr_layout=True)
+        dataset = update["val_dataloader"]["dataset"]
+        self.assertEqual(dataset["split"], "test")
+        self.assertTrue(dataset["img_folder"].endswith("UA-DETRAC_COCO/test"))
+
+        update = {}
+        apply_detr_protocol_overrides(update, CAS_DAIR, None, rtdetr_layout=True)
+        self.assertEqual(update["val_dataloader"]["dataset"]["split"], "eval")
 
     def test_report_protocol_accepts_all_report_namespaces(self):
         previous = os.environ.get("EXPERIMENT_DATASET_PROTOCOL")

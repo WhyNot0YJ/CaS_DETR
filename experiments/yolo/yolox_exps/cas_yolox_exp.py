@@ -36,7 +36,7 @@ class CasYoloxExp(MyExp):
         self.depth = 0.33
         self.width = 0.50
         self.train_ann = "instances_train.json"
-        self.val_ann = "instances_val.json"
+        self.val_ann = "instances_eval.json"
         self.test_ann = "instances_test.json"
         self.image_layout = "split_subdir"
 
@@ -62,7 +62,7 @@ class CasYoloxExp(MyExp):
         testdev = kwargs.get("testdev", False)
         legacy = kwargs.get("legacy", False)
         json_file = self.test_ann if testdev else self.val_ann
-        name = "test" if testdev else "val"
+        name = "test" if "test" in json_file else "eval"
         return self._dataset_cls()(
             data_dir=self.data_dir,
             json_file=json_file,

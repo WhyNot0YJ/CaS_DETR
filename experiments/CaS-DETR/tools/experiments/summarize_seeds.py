@@ -19,6 +19,11 @@ METRICS = (
 )
 
 
+def _is_official_eval(row):
+    protocol = " ".join(str(row.get(key, "")) for key in ("dataset", "training_taxonomy")).lower()
+    return row.get("eval_split") == ("test" if "ua-detrac" in protocol or "uadetrac" in protocol else "eval")
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
@@ -33,13 +38,13 @@ def read_seed(root, model, seed):
     with path.open(newline="", encoding="utf-8") as f:
         rows = [
             row for row in csv.DictReader(f)
-            if row.get("eval_split") == "val"
+            if _is_official_eval(row)
             and (path != result_csv("eval_metrics") or (
                 row.get("model") == model and str(row.get("seed", "")) == str(seed)
             ))
         ]
     if len(rows) != 1:
-        raise ValueError(f"expected one val row in {path}, found {len(rows)}")
+        raise ValueError(f"expected one official eval row in {path}, found {len(rows)}")
     return {metric: float(rows[0][metric]) for metric in METRICS}
 
 

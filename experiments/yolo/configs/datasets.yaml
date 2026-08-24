@@ -1,5 +1,5 @@
-# data_yaml: train/val for Ultralytics training and validation.
-# test plus labels_meta/test enables post-training test mAP in base_yolo_trainer.
+# data_yaml: native labelled targets select checkpoints and drive final evaluation:
+# DAIR-V2X uses official eval; UA-DETRAC uses its labelled official test.
 # coco_data_root / detr_dataset_class / num_classes are shared by DETR-style runners.
 datasets:
   dairv2x:

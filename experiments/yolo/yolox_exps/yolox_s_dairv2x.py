@@ -11,4 +11,6 @@ class Exp(CasYoloxExp):
         super().__init__()
         self.num_classes = 5
         self.image_layout = "flat_image_dir"
+        self.val_ann = "instances_eval.json"
+        self.test_ann = "instances_eval.json"
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import argparse
 from datetime import datetime
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent
 PYTHON = os.environ.get("YOLO_PYTHON", os.sys.executable)
-BATCH_LOG = ROOT / "logs" / "continue_132_batch.log"
+BATCH_LOG = Path(os.environ.get("YOLO_CONTINUATION_LOG", ROOT / "logs" / "continue_132_batch.log"))
 
 
 def record(message: str) -> None:
@@ -53,18 +54,27 @@ def find_job(config: Path) -> tuple[str, Path]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--only-failed", action="store_true", help="only retry the failed Ultralytics YOLO jobs")
+    args = parser.parse_args()
     configs = sorted(
         path
         for path in (ROOT / "configs").glob("*.yaml")
         if path.name.startswith(("yolov", "yolox", "fasterrcnn"))
     )
+    if args.only_failed:
+        configs = [path for path in configs if path.name.startswith("yolov")]
     jobs = []
     for config in configs:
         cfg = yaml.safe_load(config.read_text(encoding="utf-8"))
         if int(cfg["training"]["epochs"]) != 132:
             raise RuntimeError(f"{config} is not configured for 132 epochs")
         entry, checkpoint = find_job(config)
-        jobs.append((entry, config, checkpoint))
+        version = ""
+        if entry == "train.py":
+            model_name = str(cfg["model"]["model_name"]).removesuffix(".pt")
+            version = model_name.removeprefix("yolov")[0:-1] if model_name.startswith("yolov") else model_name.removeprefix("yolo")[0:-1]
+        jobs.append((entry, config, checkpoint, version))
 
     BATCH_LOG.parent.mkdir(parents=True, exist_ok=True)
     record(f"BATCH_START jobs={len(jobs)}")
@@ -73,17 +83,21 @@ def main() -> int:
     env["PYTHONUNBUFFERED"] = "1"
     failures = 0
 
-    for index, (entry, config, checkpoint) in enumerate(jobs, 1):
+    for index, (entry, config, checkpoint, version) in enumerate(jobs, 1):
         command = [
             PYTHON,
             entry,
+        ]
+        if version:
+            command.extend(["--version", version])
+        command.extend([
             "--config",
             str(config.relative_to(ROOT)),
             "--resume_from_checkpoint",
             str(checkpoint.resolve()),
             "--epochs",
             "132",
-        ]
+        ])
         record(f"JOB_START {index}/{len(jobs)} {config.name} checkpoint={checkpoint}")
         with BATCH_LOG.open("a", encoding="utf-8") as log_handle:
             result = subprocess.run(

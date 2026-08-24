@@ -30,7 +30,7 @@ val_dataloader:
   dataset:
     type: CocoDetection
     img_folder: /root/autodl-fs/datasets/DAIR-V2X
-    ann_file: /root/autodl-fs/datasets/DAIR-V2X/annotations/instances_val.json
+    ann_file: /root/autodl-fs/datasets/DAIR-V2X/annotations/instances_eval.json
     return_masks: False
   shuffle: False
   num_workers: 12

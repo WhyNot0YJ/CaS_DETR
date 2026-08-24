@@ -150,7 +150,7 @@ run_trt_benchmark_for_eval() {
     local framework="$1" config="$2" output_dir="$3" model="$4" requested_run_id="${5:-}"
     local images="/root/autodl-fs/datasets/DAIR-V2X/image"
     if [[ "$config" == *uadetrac* ]]; then
-        images="/root/autodl-fs/datasets/UA-DETRAC_COCO/val"
+        images="/root/autodl-fs/datasets/UA-DETRAC_COCO/test"
     fi
     [ "$TRT_BENCHMARK" = "0" ] && return 0
     local checkpoint=""
@@ -1537,14 +1537,14 @@ run_single_experiment() {
 
         if [ "$TEST_MODE" = true ]; then
             if [ -n "$resume_arg" ]; then
-                "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $resume_arg -u tuning=null epoches=2
+                TRAIN_NOTIFY_DEFER_SUCCESS=1 "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $resume_arg -u tuning=null epoches=2
             else
-                "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $pretrained_arg -u epoches=2
+                TRAIN_NOTIFY_DEFER_SUCCESS=1 "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $pretrained_arg -u epoches=2
             fi
         elif [ -n "$resume_arg" ]; then
-            "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $resume_arg -u tuning=null
+            TRAIN_NOTIFY_DEFER_SUCCESS=1 "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $resume_arg -u tuning=null
         else
-            "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $pretrained_arg
+            TRAIN_NOTIFY_DEFER_SUCCESS=1 "$PYTHON_BIN" train.py "${reproducibility_args[@]}" -c "$yml_rel" "$protocol_arg" $pretrained_arg
         fi
         local train_exit=$?
 
@@ -1553,13 +1553,16 @@ run_single_experiment() {
         if [ $train_exit -eq 0 ]; then
             cd "$original_dir"
             log_info "运行 CaS 兼容评估: $config_path"
+            local eval_split="test"
+            [ "$experiment_protocol" = "dairv2x" ] && eval_split="eval"
             local eval_args=(
+                env "TRAIN_NOTIFY_FINAL_EVAL=1"
                 "$PYTHON_BIN" common/eval_deim_dfine.py
                 --framework "$fw_flag"
                 --config "$config_path"
                 --model-name "$exp_name"
                 "$protocol_arg"
-                --splits test
+                --splits "$eval_split"
                 --device cuda
             )
             if [ ${#reproducibility_args[@]} -gt 0 ]; then

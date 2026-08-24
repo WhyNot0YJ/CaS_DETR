@@ -28,8 +28,8 @@ val_dataloader:
   type: DataLoader
   dataset:
     type: CocoDetection
-    img_folder: /root/autodl-fs/datasets/UA-DETRAC_COCO/val
-    ann_file: /root/autodl-fs/datasets/UA-DETRAC_COCO/annotations/instances_val.json
+    img_folder: /root/autodl-fs/datasets/UA-DETRAC_COCO/test
+    ann_file: /root/autodl-fs/datasets/UA-DETRAC_COCO/annotations/instances_test.json
     return_masks: False
   shuffle: False
   num_workers: 12

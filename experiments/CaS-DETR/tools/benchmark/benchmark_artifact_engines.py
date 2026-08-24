@@ -10,27 +10,27 @@ from pathlib import Path
 SPECS = {
     "deim_ua": (
         "deim", "UA-DETRAC", "deim_ua_fp16.engine",
-        "/root/autodl-fs/datasets/UA-DETRAC_COCO/val",
+        "/root/autodl-fs/datasets/UA-DETRAC_COCO/test",
     ),
     "dfine_ua": (
         "dfine", "UA-DETRAC", "dfine_ua_fp16.engine",
-        "/root/autodl-fs/datasets/UA-DETRAC_COCO/val",
+        "/root/autodl-fs/datasets/UA-DETRAC_COCO/test",
     ),
     "cas_dair_base03": (
         "casdeim", "DAIR-V2X", "cas_dair_base03_fp16.engine",
-        "/root/autodl-fs/datasets/DAIR-V2X_YOLO/images/val",
+        "/root/autodl-fs/datasets/DAIR-V2X_YOLO/images/eval",
     ),
     "cas_ua_base05": (
         "casdeim", "UA-DETRAC", "cas_ua_base05_fp16.engine",
-        "/root/autodl-fs/datasets/UA-DETRAC_COCO/val",
+        "/root/autodl-fs/datasets/UA-DETRAC_COCO/test",
     ),
     "cas_05x_dair_base05": (
         "casdeim", "DAIR-V2X", "cas_05x_dair_base05_fp16.engine",
-        "/root/autodl-fs/datasets/DAIR-V2X_YOLO/images/val",
+        "/root/autodl-fs/datasets/DAIR-V2X_YOLO/images/eval",
     ),
     "cas_05x_dair_base05_dense_experts": (
         "casdeim", "DAIR-V2X", "cas_05x_dair_base05_dense_experts_fp16.engine",
-        "/root/autodl-fs/datasets/DAIR-V2X_YOLO/images/val",
+        "/root/autodl-fs/datasets/DAIR-V2X_YOLO/images/eval",
     ),
 }
 REPO_ROOT = Path(__file__).resolve().parents[4]
