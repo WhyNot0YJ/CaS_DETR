@@ -33,7 +33,6 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac
 #                                                               # DEIM baseline vs. CaS 主实验：Dense 首层 + 后两层 MoE
 #   ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only
-#   ./run_batch_experiments.sh --cas-dynamic-base --dairv2x    # DAIR dynamic base .5/.7（.3 复用主实验）
 #   ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x（4x 宽度匹配自动 upcycle，其余随机）
 #   ./run_batch_experiments.sh --cas-all-train --dairv2x       # 所有 DAIR CaS 训练组（不含 native DEIM）
 #   ./run_batch_experiments.sh --dqm_detr                      # 只运行 DQM-DETR 全部消融+主实验（消融子组 + 主实验 × 2 协议）
@@ -305,23 +304,14 @@ declare -A RTDETRV2_ADAPTER_CONFIGS=(
 
 # CaS-DETR paper-aligned experiment plan.  Native DEIM is intentionally not
 # mirrored as an all-off CaS config; run it with --deim under the same protocol.
-# Main experiments: the two hybrid-decoder placements (layer order in the name,
-# layer0->layer2).  With top-k=2, each 512-wide expert activates the same 1024
-# FFN width per token as the dense decoder.
+# Main experiments: the active vanilla and PG-MoE CaS variants.
 declare -a CAS_MAIN_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d512_dynamic03_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d512_dynamic03_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_hgnetv2_s_dairv2x.yml"
 )
 
 declare -a CAS_COMPONENT_ABLATION_EXPERIMENTS=(
     "CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x.yml"
-)
-
-# DAIR dynamic .3 is the main anchor.  This group adds only .5 and .7.
-declare -a CAS_DYNAMIC_BASE_ABLATION_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic07_hgnetv2_s_dairv2x.yml"
 )
 
 # E=4 and top-k=2 stay fixed.  Capacity scans remain separate from the hybrid
@@ -340,12 +330,9 @@ declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=(
 # Set `moe_symmetry_break_std: 0` in a config to force random initialization.
 
 declare -A CAS_EXPERIMENT_CONFIGS=(
-    ["cas-main-moe2dense1-dairv2x"]="CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d512_dynamic03_hgnetv2_s_dairv2x.yml"
-    ["cas-main-dense1moe2-dairv2x"]="CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d512_dynamic03_hgnetv2_s_dairv2x.yml"
+    ["cas-main-vanilla-moe-dairv2x"]="CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml"
+    ["cas-main-pg-moe-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_hgnetv2_s_dairv2x.yml"
     ["cas-component-token-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
-    ["cas-component-decoder-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x.yml"
-    ["cas-dynamic-base05-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x.yml"
-    ["cas-dynamic-base07-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic07_hgnetv2_s_dairv2x.yml"
     ["cas-moe-cap05x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x.yml"
     ["cas-moe-cap1x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
     ["cas-moe-cap2x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x.yml"
@@ -355,8 +342,7 @@ declare -A CAS_EXPERIMENT_CONFIGS=(
 cas_result_group() {
     case "$1" in
         CaS-DETR/configs/dataset/main/*) echo "main" ;;
-        *cas_detr_token_only_*|*cas_detr_dense1_moe2_e4d128_only_*) echo "component_ablation" ;;
-        *cas_detr_dense1_moe2_e4d128_dynamic05_*|*cas_detr_dense1_moe2_e4d128_dynamic07_*) echo "dynamic_base" ;;
+        *cas_detr_token_only_*) echo "component_ablation" ;;
         *cas_detr_moe4_cap05x_*|*cas_detr_moe4_cap1x_*|*cas_detr_moe4_cap2x_*|*cas_detr_moe4_cap4x_*) echo "moe_capacity" ;;
         *) echo "" ;;
     esac
@@ -489,8 +475,8 @@ declare -A DFINE_CONFIGS=(
 declare -a CURRENT_MAIN_EXPERIMENTS=(
     "DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain.yml"  # DEIM: no Sparse, no MoE
     "CaS-DETR/configs/deim_dfine/minimal_sparse_hgnetv2_s_dairv2x.yml"  # Sparse only
-    "CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_e4d512_hgnetv2_s_dairv2x.yml"  # CaS: Sparse + Vanilla MoE
-    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_e4d512_hgnetv2_s_dairv2x.yml"  # CaS + PG-MoE
+    "CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml"  # CaS: Sparse + Vanilla MoE
+    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_hgnetv2_s_dairv2x.yml"  # CaS + PG-MoE
 )
 
 # 构建全部配置列表与名称映射
@@ -872,7 +858,6 @@ parse_arguments() {
     local has_rtdetrv2=false
     local has_cas_main=false
     local has_cas_components=false
-    local has_cas_dynamic_base=false
     local has_cas_moe_capacity=false
     local has_cas_all_train=false
     local has_dqm_detr=false
@@ -904,9 +889,6 @@ parse_arguments() {
                 ;;
             --cas-components|--cas_components)
                 has_cas_components=true
-                ;;
-            --cas-dynamic-base|--cas_dynamic_base)
-                has_cas_dynamic_base=true
                 ;;
             --cas-moe-capacity|--cas_moe_capacity)
                 has_cas_moe_capacity=true
@@ -966,14 +948,13 @@ parse_arguments() {
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_main" = true ] || [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_dynamic_base" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_fair_baselines" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_main" = true ] || [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_fair_baselines" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_main" = true ] && selected_types+=("CurrentMain")
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
         [ "$has_cas_main" = true ] && selected_types+=("CaS_Main")
         [ "$has_cas_components" = true ] && selected_types+=("CaS_ComponentAblation")
-        [ "$has_cas_dynamic_base" = true ] && selected_types+=("CaS_DynamicBase")
         [ "$has_cas_moe_capacity" = true ] && selected_types+=("CaS_MoECapacity")
         [ "$has_cas_all_train" = true ] && selected_types+=("CaS_AllTrain")
         [ "$has_dqm_detr" = true ] && selected_types+=("DQM_DETR(all)")
@@ -1014,13 +995,11 @@ parse_arguments() {
         if [ "$has_cas_all_train" = true ]; then
             has_cas_main=true
             has_cas_components=true
-            has_cas_dynamic_base=true
             has_cas_moe_capacity=true
         fi
 
         [ "$has_cas_main" = true ] && append_cas_group "${CAS_MAIN_EXPERIMENTS[@]}"
         [ "$has_cas_components" = true ] && append_cas_group "${CAS_COMPONENT_ABLATION_EXPERIMENTS[@]}"
-        [ "$has_cas_dynamic_base" = true ] && append_cas_group "${CAS_DYNAMIC_BASE_ABLATION_EXPERIMENTS[@]}"
         [ "$has_cas_moe_capacity" = true ] && append_cas_group "${CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS[@]}"
         if [ "$has_dqm_detr" = true ]; then
             for key in $(printf '%s\n' "${!DQM_DETR_CONFIGS[@]}" | sort); do
@@ -1253,7 +1232,6 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac  # DEIM baseline 与 CaS 主实验"
         echo "  ./run_batch_experiments.sh --cas-main --dataset dairv2x,uadetrac  # CaS 主实验"
         echo "  ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only"
-        echo "  ./run_batch_experiments.sh --cas-dynamic-base --dairv2x    # DAIR dynamic base .5/.7（.3 复用主实验）"
         echo "  ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x（Xavier 随机初始化）"
         echo "  ./run_batch_experiments.sh --cas-all-train --dairv2x       # 全部 DAIR CaS 训练组"
         echo "  ./run_batch_experiments.sh --dqm_detr                      # DQM-DETR 全部消融+主实验（2 协议 × 消融 + 主实验）"
