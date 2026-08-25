@@ -306,11 +306,11 @@ declare -A RTDETRV2_ADAPTER_CONFIGS=(
 # CaS-DETR paper-aligned experiment plan.  Native DEIM is intentionally not
 # mirrored as an all-off CaS config; run it with --deim under the same protocol.
 # Main experiments: the two hybrid-decoder placements (layer order in the name,
-# layer0->layer2).  The dense FFN is width-matched and inherits the pretrained
-# weights through `tuning`; the 128-wide experts stay random.
+# layer0->layer2).  With top-k=2, each 512-wide expert activates the same 1024
+# FFN width per token as the dense decoder.
 declare -a CAS_MAIN_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d128_dynamic03_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d128_dynamic03_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d512_dynamic03_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d512_dynamic03_hgnetv2_s_dairv2x.yml"
 )
 
 declare -a CAS_COMPONENT_ABLATION_EXPERIMENTS=(
@@ -340,8 +340,8 @@ declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=(
 # Set `moe_symmetry_break_std: 0` in a config to force random initialization.
 
 declare -A CAS_EXPERIMENT_CONFIGS=(
-    ["cas-main-moe2dense1-dairv2x"]="CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d128_dynamic03_hgnetv2_s_dairv2x.yml"
-    ["cas-main-dense1moe2-dairv2x"]="CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d128_dynamic03_hgnetv2_s_dairv2x.yml"
+    ["cas-main-moe2dense1-dairv2x"]="CaS-DETR/configs/dataset/main/cas_detr_moe2dense1_e4d512_dynamic03_hgnetv2_s_dairv2x.yml"
+    ["cas-main-dense1moe2-dairv2x"]="CaS-DETR/configs/dataset/main/cas_detr_dense1moe2_e4d512_dynamic03_hgnetv2_s_dairv2x.yml"
     ["cas-component-token-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
     ["cas-component-decoder-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_only_hgnetv2_s_dairv2x.yml"
     ["cas-dynamic-base05-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_dense1_moe2_e4d128_dynamic05_hgnetv2_s_dairv2x.yml"
@@ -489,8 +489,8 @@ declare -A DFINE_CONFIGS=(
 declare -a CURRENT_MAIN_EXPERIMENTS=(
     "DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain.yml"  # DEIM: no Sparse, no MoE
     "CaS-DETR/configs/deim_dfine/minimal_sparse_hgnetv2_s_dairv2x.yml"  # Sparse only
-    "CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml"  # CaS: Sparse + Vanilla MoE
-    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_hgnetv2_s_dairv2x.yml"  # CaS + PG-MoE
+    "CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_e4d512_hgnetv2_s_dairv2x.yml"  # CaS: Sparse + Vanilla MoE
+    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_e4d512_hgnetv2_s_dairv2x.yml"  # CaS + PG-MoE
 )
 
 # 构建全部配置列表与名称映射

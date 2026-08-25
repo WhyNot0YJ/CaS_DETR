@@ -1,0 +1,10 @@
+__include__: [
+  '../../deim_dfine/deim_hgnetv2_s_dairv2x.yml',
+  '../../base/cas_detr_hybrid_moe_e4d512.yml'
+]
+
+output_dir: ./outputs/main/cas_detr_dense1moe2_e4d512_dynamic03_hgnetv2_s_dairv2x
+
+# Layer order [Dense, MoE, MoE].
+DFINETransformer:
+  moe_layer_indices: [1, 2]
