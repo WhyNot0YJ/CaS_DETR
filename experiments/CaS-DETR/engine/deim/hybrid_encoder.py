@@ -112,6 +112,41 @@ class SCDown(nn.Module):
         return self.cv2(self.cv1(x))
 
 
+class CASSPredictor(nn.Module):
+    """Context-aware token scorer retained for legacy CASS checkpoints."""
+
+    def __init__(self, input_dim: int, hidden_dim: int = 128,
+                 reduction_ratio: int = 4, dropout: float = 0.1):
+        super().__init__()
+        reduced_dim = max(input_dim // reduction_ratio, 16)
+        self.local_fc1 = nn.Linear(input_dim, hidden_dim)
+        self.local_act = nn.GELU()
+        self.local_dropout = nn.Dropout(dropout)
+        self.local_fc2 = nn.Linear(hidden_dim, 1)
+        self.global_fc1 = nn.Conv1d(input_dim, reduced_dim, kernel_size=1)
+        self.global_act = nn.GELU()
+        self.global_fc2 = nn.Conv1d(reduced_dim, hidden_dim, kernel_size=1)
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for layer in (self.local_fc1, self.local_fc2,
+                      self.global_fc1, self.global_fc2):
+            nn.init.xavier_uniform_(layer.weight)
+            nn.init.zeros_(layer.bias)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        local_feat = self.local_fc1(tokens)
+        local_feat = self.local_act(local_feat)
+        local_feat = self.local_dropout(local_feat)
+
+        gap = tokens.mean(dim=1, keepdim=True).permute(0, 2, 1)
+        global_feat = self.global_fc1(gap)
+        global_feat = self.global_act(global_feat)
+        global_weights = torch.sigmoid(self.global_fc2(global_feat))
+        global_weights = global_weights.squeeze(-1).unsqueeze(1)
+        return self.local_fc2(local_feat * global_weights).squeeze(-1)
+
+
 class VGGBlock(nn.Module):
     def __init__(self, ch_in, ch_out, act='relu'):
         super().__init__()
@@ -283,46 +318,6 @@ class TransformerEncoder(nn.Module):
         return output
 
 
-class CAIPPredictor(nn.Module):
-    """Optional global-context scorer for token pruning."""
-
-    def __init__(self, input_dim: int, hidden_dim: int = 128,
-                 reduction_ratio: int = 4, dropout: float = 0.1):
-        super().__init__()
-        reduced_dim = max(input_dim // reduction_ratio, 16)
-        self.local_fc1 = nn.Linear(input_dim, hidden_dim)
-        self.local_act = nn.GELU()
-        self.local_dropout = nn.Dropout(dropout)
-        self.local_fc2 = nn.Linear(hidden_dim, 1)
-
-        self.global_fc1 = nn.Conv1d(input_dim, reduced_dim, kernel_size=1)
-        self.global_act = nn.GELU()
-        self.global_fc2 = nn.Conv1d(reduced_dim, hidden_dim, kernel_size=1)
-        self._reset_parameters()
-
-    def _reset_parameters(self):
-        for m in (self.local_fc1, self.local_fc2):
-            nn.init.xavier_uniform_(m.weight)
-            nn.init.zeros_(m.bias)
-        for m in (self.global_fc1, self.global_fc2):
-            nn.init.xavier_uniform_(m.weight)
-            nn.init.zeros_(m.bias)
-
-    def forward(self, tokens: torch.Tensor):
-        local_feat = self.local_fc1(tokens)
-        local_feat = self.local_act(local_feat)
-        local_feat = self.local_dropout(local_feat)
-
-        gap = tokens.mean(dim=1, keepdim=True).permute(0, 2, 1)
-        global_feat = self.global_fc1(gap)
-        global_feat = self.global_act(global_feat)
-        pre_sigmoid = self.global_fc2(global_feat)
-        global_weights = torch.sigmoid(pre_sigmoid).squeeze(-1).unsqueeze(1)
-
-        importance_scores = self.local_fc2(local_feat * global_weights).squeeze(-1)
-        return importance_scores
-
-
 @register()
 class HybridEncoder(nn.Module):
     __share__ = ['eval_spatial_size', ]
@@ -346,6 +341,7 @@ class HybridEncoder(nn.Module):
                  token_keep_ratio=1.0,
                  enable_cas_predictor=False,
                  use_cass=False,
+                 use_dynamic=True,
                  cass_expansion_ratio=0.3,
                  cass_min_size=1.0,
                  cass_decay_type='gaussian',
@@ -353,11 +349,10 @@ class HybridEncoder(nn.Module):
                  cass_loss_type='vfl',
                  cass_focal_alpha=0.75,
                  cass_focal_beta=2.0,
-                 use_caip=False,
-                 caip_reduction_ratio=4,
-                 caip_complexity_alpha=0.3,
-                 caip_dynamic_warmup_epochs=0,
-                 caip_static_keep_eval=False,
+                 cass_complexity_alpha=0.3,
+                 cass_dynamic_warmup_epochs=0,
+                 cass_static_keep_eval=False,
+                 cass_predictor_variant='linear',
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -371,10 +366,11 @@ class HybridEncoder(nn.Module):
         self.out_strides = feat_strides
         self.enable_cas_predictor = enable_cas_predictor
         self.use_cass = use_cass and enable_cas_predictor
-        self.use_caip = use_caip and enable_cas_predictor
-        self.caip_complexity_alpha = caip_complexity_alpha
-        self.caip_dynamic_warmup_epochs = int(caip_dynamic_warmup_epochs or 0)
-        self.caip_static_keep_eval = bool(caip_static_keep_eval)
+        self.use_dynamic = bool(use_dynamic) and enable_cas_predictor
+        self.cass_complexity_alpha = cass_complexity_alpha
+        self.cass_dynamic_warmup_epochs = int(cass_dynamic_warmup_epochs or 0)
+        self.cass_static_keep_eval = bool(cass_static_keep_eval)
+        self.cass_predictor_variant = str(cass_predictor_variant or 'linear').lower()
         self._epoch = 0
 
         # channel projection
@@ -419,15 +415,15 @@ class HybridEncoder(nn.Module):
         else:
             self.shared_token_pruner = None
 
-        if self.use_caip:
-            self.caip_predictor = CAIPPredictor(
+        if self.enable_cas_predictor and self.cass_predictor_variant == 'global_context':
+            self.cass_predictor = CASSPredictor(
                 input_dim=hidden_dim,
                 hidden_dim=128,
-                reduction_ratio=caip_reduction_ratio,
+                reduction_ratio=4,
                 dropout=dropout if dropout > 0 else 0.1,
             )
         else:
-            self.caip_predictor = None
+            self.cass_predictor = None
 
         # top-down fpn
         self.lateral_convs = nn.ModuleList()
@@ -582,24 +578,29 @@ class HybridEncoder(nn.Module):
                 external_scores = None
                 dynamic_keep_ratio = None
 
-                if self.caip_predictor is not None:
-                    external_scores = self.caip_predictor(src_flatten)
+                if self.use_dynamic and self.shared_token_pruner is not None:
+                    if self.cass_predictor is not None:
+                        external_scores = self.cass_predictor(src_flatten)
+                    else:
+                        external_scores = self.shared_token_pruner.importance_predictor(
+                            src_flatten, h, w
+                        )
                     base_ratio = float(self.shared_token_pruner.keep_ratio)
-                    if self._epoch < self.caip_dynamic_warmup_epochs:
+                    if self._epoch < self.cass_dynamic_warmup_epochs:
                         # Warmup: disable pruning (keep all tokens) while the scorer learns.
                         dynamic_keep_ratio = torch.ones(
                             src_flatten.shape[0], device=src_flatten.device, dtype=torch.float32
                         )
                         encoder_info['dynamic_keep_ratio'] = dynamic_keep_ratio
                     else:
-                        if self.caip_static_keep_eval and not self.training:
-                            # Eval: fixed keep fraction = token_keep_ratio; CAIP scores still rank tokens.
+                        if self.cass_static_keep_eval and not self.training:
+                            # Eval: fixed keep fraction = token_keep_ratio; CASS scores still rank tokens.
                             dynamic_keep_ratio = base_ratio
                         else:
                             # Complexity proxy: per-image mean token confidence.
                             # Detach to avoid trivially inflating scores to disable pruning.
                             mean_conf = torch.sigmoid(external_scores.detach()).mean(dim=1)  # [B]
-                            dynamic_keep_ratio = base_ratio + (1.0 - base_ratio) * mean_conf * self.caip_complexity_alpha
+                            dynamic_keep_ratio = base_ratio + (1.0 - base_ratio) * mean_conf * self.cass_complexity_alpha
                             dynamic_keep_ratio = dynamic_keep_ratio.clamp(min=base_ratio, max=1.0)
                         if isinstance(dynamic_keep_ratio, torch.Tensor):
                             encoder_info['dynamic_keep_ratio'] = dynamic_keep_ratio

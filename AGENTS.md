@@ -6,9 +6,8 @@
 ## 主线边界
 
 - 主线名称统一写作 `CaS-DETR`，核心实现位于 `experiments/CaS-DETR/`。
-- CaS 组件及源码位置：Token pruning/CAIP 在
-  `engine/deim/hybrid_encoder.py`，CASS 在
-  `engine/deim/token_level_pruning.py`，MoE 在
+- CaS 组件及源码位置：Token pruning 与 CASS 在
+  `engine/deim/hybrid_encoder.py`、`engine/deim/token_level_pruning.py`，MoE 在
   `engine/deim/moe_components.py` 和 `engine/deim/dfine_decoder.py`，相关损失在
   `engine/deim/deim_criterion.py`。
 - 只在用户明确要求时扩展主线；不要把容量、专家数或部署扫描写成主结果。

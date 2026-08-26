@@ -25,7 +25,7 @@ This repository benchmarks object detection models on **DAIR-V2X** and related d
 
 - `HybridEncoder` supports token pruning through `shared_token_pruner`
 - pruning is currently used for semantic filtering, not aggressive full multi-level sparsification
-- `use_caip` and `use_cass` remain configurable
+- `use_cass` remains configurable
 
 ### Decoder MoE
 
@@ -42,8 +42,8 @@ This repository benchmarks object detection models on **DAIR-V2X** and related d
 YAML configs live in `experiments/CaS-DETR/configs/`. Important fields:
 
 - `HybridEncoder.token_keep_ratio`
-- `HybridEncoder.use_caip`
 - `HybridEncoder.use_cass`
+- `HybridEncoder.cass_complexity_alpha`
 - `DFINETransformer.use_moe`
 - `DFINETransformer.num_experts`
 - `DFINETransformer.moe_top_k`
