@@ -1,12 +1,11 @@
 # CaS-DETR
 
-CaS-DETR 是一个基于 DEIM/D-FINE 的轻量目标检测实验实现，研究 Token pruning、复杂度感知排序（CAIP）、软监督重要性学习（CASS）与 Decoder MoE 的组合。
+CaS-DETR 是一个基于 DEIM/D-FINE 的轻量目标检测实验实现，研究 Token pruning、软监督重要性学习（CASS）与 Decoder MoE 的组合。
 
 ## 方法主线
 
 - Token pruning：减少后续编码器计算量。
-- CAIP：利用图像复杂度辅助 Token 排序。
-- CASS：监督 Token 重要性预测。
+- CASS：监督 Token 重要性预测，并利用图像复杂度辅助 Token 排序。
 - Decoder MoE：在 D-FINE 解码器 FFN 中进行稀疏专家路由。
 
 主实现位于 `experiments/CaS-DETR/engine/deim/`；训练与评测入口为

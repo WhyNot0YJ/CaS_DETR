@@ -8,7 +8,6 @@ output_dir: ./outputs/ablation/cas_deim_cass_only_keep05_hgnetv2_s_dairv2x
 HybridEncoder:
   enable_cas_predictor: True
   token_keep_ratio: 0.5
-  use_caip: False
   use_cass: True
 
 DFINETransformer:

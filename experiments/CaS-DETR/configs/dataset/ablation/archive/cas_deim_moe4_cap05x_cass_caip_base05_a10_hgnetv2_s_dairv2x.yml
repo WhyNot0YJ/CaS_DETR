@@ -1,8 +1,0 @@
-__include__: [
-  './cas_deim_moe4_cap05x_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml'
-]
-
-output_dir: ./outputs/ablation/cas_deim_moe4_cap05x_cass_caip_base05_a10_hgnetv2_s_dairv2x
-
-HybridEncoder:
-  token_keep_ratio: 0.5
