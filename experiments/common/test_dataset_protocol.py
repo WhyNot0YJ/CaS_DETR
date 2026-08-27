@@ -16,12 +16,12 @@ EXPERIMENTS = Path(__file__).resolve().parent.parent
 CAS_DAIR = (
     EXPERIMENTS
     / "CaS-DETR/configs/dataset/ablation/archive/"
-    "cas_deim_moe4_cass_base03_a10_hgnetv2_s_dairv2x.yml"
+    "cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x.yml"
 )
 CAS_UA = (
     EXPERIMENTS
     / "CaS-DETR/configs/dataset/ablation/archive/"
-    "cas_deim_moe4_cass_base03_a10_hgnetv2_s_uadetrac.yml"
+    "cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_uadetrac.yml"
 )
 
 
@@ -36,7 +36,7 @@ class DatasetProtocolTest(unittest.TestCase):
         self.assertTrue(update["val_dataloader"]["dataset"]["ann_file"].endswith("instances_eval.json"))
         self.assertEqual(
             update["output_dir"],
-            "./outputs/dairv2x/ablation/cas_deim_moe4_cass_base03_a10_hgnetv2_s_dairv2x",
+            "./outputs/dairv2x/ablation/cas_deim_moe4_cass_caip_base03_a10_hgnetv2_s_dairv2x",
         )
 
     def test_uadetrac_is_the_default(self):

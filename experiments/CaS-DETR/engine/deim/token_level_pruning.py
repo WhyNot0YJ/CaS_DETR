@@ -118,9 +118,9 @@ class TokenLevelPruner(nn.Module):
             tokens: [B, N, C] token特征，N = H*W
             spatial_shape: (H, W) 空间形状
             return_indices: 是否返回保留索引
-            external_scores: [B, N] 可选的预计算重要性分数（来自动态/CASS路径），
+            external_scores: [B, N] 可选的外部重要性分数（来自 CAIP），
                              提供时跳过内部 importance_predictor
-            dynamic_keep_ratio: 可选的动态保留比例（由场景复杂度调整）。
+            dynamic_keep_ratio: 可选的动态保留比例（来自 CAIP scene_complexity）。
                                 - 标量：整个 batch 共用一个 keep_ratio
                                 - Tensor [B]：每张图一个 keep_ratio
                                 提供时覆盖 self.keep_ratio
@@ -138,13 +138,13 @@ class TokenLevelPruner(nn.Module):
         else:
             H, W = 0, 0
         
-        # Use precomputed dynamic/CASS scores when provided; otherwise use the internal predictor.
+        # Use external CAIP scores when provided; otherwise fall back to internal predictor
         if external_scores is not None:
             token_importance_scores = external_scores
         else:
             token_importance_scores = self.importance_predictor(tokens, H, W)  # [B, N]
 
-        # Effective keep ratio: prefer the dynamic ratio over static.
+        # Effective keep ratio: prefer dynamic (CAIP) over static
         effective_keep_ratio = dynamic_keep_ratio if dynamic_keep_ratio is not None else self.keep_ratio
 
         # Pruning is enabled if effective ratio < 1.0 (no warmup)

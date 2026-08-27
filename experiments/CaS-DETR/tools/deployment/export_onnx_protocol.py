@@ -26,8 +26,8 @@ def parse_args():
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--opset", type=int, default=17)
-    parser.add_argument("--cass-static-keep-eval", action="store_true")
-    parser.add_argument("--cass-eval-keep-ratio", type=float)
+    parser.add_argument("--caip-static-keep-eval", action="store_true")
+    parser.add_argument("--caip-eval-keep-ratio", type=float)
     parser.add_argument(
         "--dataset-protocol",
         choices=(
@@ -43,8 +43,8 @@ def build(
     config_path,
     checkpoint_path,
     dataset_protocol=None,
-    cass_static_keep_eval=False,
-    cass_eval_keep_ratio=None,
+    caip_static_keep_eval=False,
+    caip_eval_keep_ratio=None,
 ):
     experiments_dir = Path(__file__).resolve().parents[3]
     framework_dir = experiments_dir / FRAMEWORK_DIRS[framework]
@@ -74,15 +74,15 @@ def build(
     encoder = getattr(model, "encoder", None)
     if hasattr(encoder, "set_epoch"):
         encoder.set_epoch(int(checkpoint.get("last_epoch", 0)))
-    if cass_static_keep_eval:
-        if encoder is None or not hasattr(encoder, "cass_static_keep_eval"):
-            raise ValueError("model does not support --cass-static-keep-eval")
-        encoder.cass_static_keep_eval = True
-    if cass_eval_keep_ratio is not None:
+    if caip_static_keep_eval:
+        if encoder is None or not hasattr(encoder, "caip_static_keep_eval"):
+            raise ValueError("model does not support --caip-static-keep-eval")
+        encoder.caip_static_keep_eval = True
+    if caip_eval_keep_ratio is not None:
         pruner = getattr(encoder, "shared_token_pruner", None)
         if pruner is None or not hasattr(pruner, "keep_ratio"):
-            raise ValueError("model does not support --cass-eval-keep-ratio")
-        pruner.keep_ratio = float(cass_eval_keep_ratio)
+            raise ValueError("model does not support --caip-eval-keep-ratio")
+        pruner.keep_ratio = float(caip_eval_keep_ratio)
     return model.deploy(), cfg.postprocessor.deploy()
 
 
@@ -98,11 +98,11 @@ class DeployModel(nn.Module):
 
 def main():
     args = parse_args()
-    if args.cass_eval_keep_ratio is not None:
-        if not args.cass_static_keep_eval:
-            raise ValueError("--cass-eval-keep-ratio requires --cass-static-keep-eval")
-        if not 0.0 < args.cass_eval_keep_ratio <= 1.0:
-            raise ValueError("--cass-eval-keep-ratio must be within (0, 1]")
+    if args.caip_eval_keep_ratio is not None:
+        if not args.caip_static_keep_eval:
+            raise ValueError("--caip-eval-keep-ratio requires --caip-static-keep-eval")
+        if not 0.0 < args.caip_eval_keep_ratio <= 1.0:
+            raise ValueError("--caip-eval-keep-ratio must be within (0, 1]")
     config = args.config.resolve()
     checkpoint = args.checkpoint.resolve()
     output = args.output.resolve()
@@ -111,8 +111,8 @@ def main():
         config,
         checkpoint,
         args.dataset_protocol,
-        args.cass_static_keep_eval,
-        args.cass_eval_keep_ratio,
+        args.caip_static_keep_eval,
+        args.caip_eval_keep_ratio,
     )
     torch.manual_seed(123)
     wrapper = DeployModel(model, postprocessor).eval()

@@ -260,18 +260,18 @@ def _unwrap_module(m: Any) -> Any:
     return m.module if hasattr(m, "module") else m
 
 
-def _set_cass_static_keep_eval(model: Any, enabled: bool) -> Dict[str, Any]:
-    """Toggle HybridEncoder.cass_static_keep_eval: fixed token_keep_ratio under eval, CASS still ranks."""
+def _set_caip_static_keep_eval(model: Any, enabled: bool) -> Dict[str, Any]:
+    """Toggle HybridEncoder.caip_static_keep_eval: fixed token_keep_ratio under eval, CAIP still ranks."""
     base = _unwrap_module(model)
     enc = getattr(base, "encoder", None)
-    if enc is None or not hasattr(enc, "cass_static_keep_eval"):
+    if enc is None or not hasattr(enc, "caip_static_keep_eval"):
         return {"found": False}
-    prev = bool(getattr(enc, "cass_static_keep_eval"))
-    setattr(enc, "cass_static_keep_eval", bool(enabled))
+    prev = bool(getattr(enc, "caip_static_keep_eval"))
+    setattr(enc, "caip_static_keep_eval", bool(enabled))
     return {"found": True, "prev": prev}
 
 
-def _set_cass_eval_keep_ratio(model: Any, keep_ratio: float) -> Dict[str, Any]:
+def _set_caip_eval_keep_ratio(model: Any, keep_ratio: float) -> Dict[str, Any]:
     """Override the pruner base ratio for a fixed-keep evaluation only."""
     base = _unwrap_module(model)
     enc = getattr(base, "encoder", None)
@@ -299,7 +299,7 @@ def _set_prune_in_eval(model: Any, enabled: bool) -> Dict[str, Any]:
 
 
 def _set_encoder_epoch(model: Any, epoch: int) -> bool:
-    """Sync epoch-dependent encoder behavior (e.g. CASS warmup scheduling)."""
+    """Sync epoch-dependent encoder behavior (e.g. CAIP warmup scheduling)."""
     base = _unwrap_module(model)
     enc = getattr(base, "encoder", None)
     if enc is None or not hasattr(enc, "set_epoch"):
@@ -821,15 +821,15 @@ def main():
         help="Disable token pruning during evaluation (sets TokenLevelPruner.prune_in_eval=False).",
     )
     parser.add_argument(
-        "--cass-static-keep-eval",
+        "--caip-static-keep-eval",
         action="store_true",
-        help="When CASS is on, use fixed keep ratio token_keep_ratio in eval mode; CASS scores still rank tokens.",
+        help="When CAIP is on, use fixed keep ratio token_keep_ratio in eval mode; CAIP scores still rank tokens.",
     )
     parser.add_argument(
-        "--cass-eval-keep-ratio",
+        "--caip-eval-keep-ratio",
         type=float,
         default=None,
-        help="Fixed CASS keep ratio for eval only; requires --cass-static-keep-eval.",
+        help="Fixed CAIP keep ratio for eval only; requires --caip-static-keep-eval.",
     )
     parser.add_argument(
         "--epoch",
@@ -848,11 +848,11 @@ def main():
         help="Optional JSON path for per-layer MoE router statistics.",
     )
     args = parser.parse_args()
-    if args.cass_eval_keep_ratio is not None:
-        if not args.cass_static_keep_eval:
-            parser.error("--cass-eval-keep-ratio requires --cass-static-keep-eval")
-        if not 0.0 < args.cass_eval_keep_ratio <= 1.0:
-            parser.error("--cass-eval-keep-ratio must be in (0, 1]")
+    if args.caip_eval_keep_ratio is not None:
+        if not args.caip_static_keep_eval:
+            parser.error("--caip-eval-keep-ratio requires --caip-static-keep-eval")
+        if not 0.0 < args.caip_eval_keep_ratio <= 1.0:
+            parser.error("--caip-eval-keep-ratio must be in (0, 1]")
 
     config_path = str(Path(args.config).resolve())
     model_name = args.model_name or Path(args.config).stem
@@ -929,7 +929,7 @@ def main():
     model = solver.ema.module if solver.ema else solver.model
     model.to(device)
     model.eval()
-    # Ensure CASS / encoder epoch-dependent scheduling matches training epoch.
+    # Ensure CAIP / encoder epoch-dependent scheduling matches training epoch.
     enc_epoch = int(args.epoch) if args.epoch is not None else int(getattr(solver, "last_epoch", 0))
     if _set_encoder_epoch(model, enc_epoch):
         LOG.info("Synced encoder epoch for eval: %s", enc_epoch)
@@ -937,27 +937,27 @@ def main():
         LOG.info("Encoder has no set_epoch(); skip epoch sync (requested=%s).", enc_epoch)
 
     restore_keep_ratio: Dict[str, Any] = {"found": False}
-    if args.cass_eval_keep_ratio is not None:
-        restore_keep_ratio = _set_cass_eval_keep_ratio(model, args.cass_eval_keep_ratio)
+    if args.caip_eval_keep_ratio is not None:
+        restore_keep_ratio = _set_caip_eval_keep_ratio(model, args.caip_eval_keep_ratio)
         if not restore_keep_ratio.get("found"):
-            LOG.error("Requested fixed CASS keep ratio, but no TokenLevelPruner was found.")
+            LOG.error("Requested fixed CAIP keep ratio, but no TokenLevelPruner was found.")
             sys.exit(2)
         LOG.info(
-            "CASS eval: keep ratio %.3f (previous %.3f)",
-            args.cass_eval_keep_ratio,
+            "CAIP eval: keep ratio %.3f (previous %.3f)",
+            args.caip_eval_keep_ratio,
             restore_keep_ratio.get("prev"),
         )
 
     restore_static_keep: Dict[str, Any] = {"found": False}
-    if args.cass_static_keep_eval:
-        restore_static_keep = _set_cass_static_keep_eval(model, enabled=True)
+    if args.caip_static_keep_eval:
+        restore_static_keep = _set_caip_static_keep_eval(model, enabled=True)
         if restore_static_keep.get("found"):
             LOG.info(
-                "CASS eval: fixed keep ratio token_keep_ratio (cass_static_keep_eval: %s -> True)",
+                "CAIP eval: fixed keep ratio token_keep_ratio (caip_static_keep_eval: %s -> True)",
                 restore_static_keep.get("prev"),
             )
         else:
-            LOG.info("Requested --cass-static-keep-eval, but encoder has no cass_static_keep_eval (skip).")
+            LOG.info("Requested --caip-static-keep-eval, but encoder has no caip_static_keep_eval (skip).")
 
     restore_pruning: Dict[str, Any] = {"found": False}
     if args.disable_pruning:
@@ -1123,9 +1123,9 @@ def main():
     if restore_pruning.get("found"):
         _set_prune_in_eval(model, enabled=bool(restore_pruning.get("prev")))
     if restore_static_keep.get("found"):
-        _set_cass_static_keep_eval(model, enabled=bool(restore_static_keep.get("prev")))
+        _set_caip_static_keep_eval(model, enabled=bool(restore_static_keep.get("prev")))
     if restore_keep_ratio.get("found"):
-        _set_cass_eval_keep_ratio(model, float(restore_keep_ratio.get("prev")))
+        _set_caip_eval_keep_ratio(model, float(restore_keep_ratio.get("prev")))
 
     os.chdir(saved_cwd)
     if os.environ.get("TRAIN_NOTIFY_FINAL_EVAL", "").strip().lower() in {"1", "true", "yes", "on"} and not test_metrics:

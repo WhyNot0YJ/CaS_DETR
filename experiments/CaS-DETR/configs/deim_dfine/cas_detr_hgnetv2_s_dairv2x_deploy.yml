@@ -6,4 +6,4 @@ output_dir: ./outputs/deployment/cas_detr_hgnetv2_s_dairv2x
 
 HybridEncoder:
   token_keep_ratio: 0.3
-  cass_static_keep_eval: True
+  caip_static_keep_eval: True

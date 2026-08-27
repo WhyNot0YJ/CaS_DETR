@@ -38,14 +38,6 @@ from .det_engine import train_one_epoch, evaluate
 from ..optim.lr_scheduler import FlatCosineLRScheduler
 
 
-def _should_run_epoch(epoch, total_epochs, frequency, extra_epochs=()):
-    return (
-        epoch == total_epochs - 1
-        or epoch in extra_epochs
-        or (epoch + 1) % max(1, frequency) == 0
-    )
-
-
 class DetSolver(BaseSolver):
 
     def fit(self, ):
@@ -97,7 +89,7 @@ class DetSolver(BaseSolver):
             if dist_utils.is_dist_available_and_initialized():
                 self.train_dataloader.sampler.set_epoch(epoch)
 
-            # Let model/encoder adjust epoch-dependent behavior (e.g., CASS warmup scheduling)
+            # Let model/encoder adjust epoch-dependent behavior (e.g., CAIP warmup scheduling)
             try:
                 modules = []
                 modules.append(self.model.module if hasattr(self.model, "module") else self.model)
@@ -140,75 +132,67 @@ class DetSolver(BaseSolver):
             self.last_epoch += 1
 
             if self.output_dir:
-                checkpoint_paths = []
-                if _should_run_epoch(epoch, args.epoches, args.last_checkpoint_freq):
-                    checkpoint_paths.append(self.output_dir / 'last.pth')
+                checkpoint_paths = [self.output_dir / 'last.pth']
                 # extra checkpoint before LR drop and every 100 epochs
                 if (epoch + 1) % args.checkpoint_freq == 0:
                     checkpoint_paths.append(self.output_dir / f'checkpoint{epoch:04}.pth')
                 for checkpoint_path in checkpoint_paths:
                     dist_utils.save_on_master(self.state_dict(), checkpoint_path)
 
-            should_evaluate = _should_run_epoch(
-                epoch, args.epoches, args.eval_freq, args.eval_at_epochs
+            module = self.ema.module if self.ema else self.model
+            test_stats, coco_evaluator = evaluate(
+                module,
+                self.criterion,
+                self.postprocessor,
+                self.val_dataloader,
+                self.evaluator,
+                self.device
             )
-            test_stats, coco_evaluator = {}, None
-            if should_evaluate:
-                module = self.ema.module if self.ema else self.model
-                test_stats, coco_evaluator = evaluate(
-                    module,
-                    self.criterion,
-                    self.postprocessor,
-                    self.val_dataloader,
-                    self.evaluator,
-                    self.device
-                )
 
-            if should_evaluate:
-                # TODO
-                for k in test_stats:
-                    if k == 'loss':
-                        continue
-                    if self.writer and dist_utils.is_main_process():
-                        for i, v in enumerate(test_stats[k]):
-                            self.writer.add_scalar(f'Test/{k}_{i}'.format(k), v, epoch)
+            # TODO
+            for k in test_stats:
+                if k == 'loss':
+                    continue
+                if self.writer and dist_utils.is_main_process():
+                    for i, v in enumerate(test_stats[k]):
+                        self.writer.add_scalar(f'Test/{k}_{i}'.format(k), v, epoch)
 
-                    if k in best_stat:
-                        best_stat['epoch'] = epoch if test_stats[k][0] > best_stat[k] else best_stat['epoch']
-                        best_stat[k] = max(best_stat[k], test_stats[k][0])
-                    else:
-                        best_stat['epoch'] = epoch
-                        best_stat[k] = test_stats[k][0]
+                if k in best_stat:
+                    best_stat['epoch'] = epoch if test_stats[k][0] > best_stat[k] else best_stat['epoch']
+                    best_stat[k] = max(best_stat[k], test_stats[k][0])
+                else:
+                    best_stat['epoch'] = epoch
+                    best_stat[k] = test_stats[k][0]
 
-                    if best_stat[k] > top1:
-                        best_stat_print['epoch'] = epoch
-                        top1 = best_stat[k]
-                        if self.output_dir:
-                            if epoch >= self.train_dataloader.collate_fn.stop_epoch:
-                                dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg2.pth')
-                            else:
-                                dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg1.pth')
-                            dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
-
-                    best_stat_print[k] = max(best_stat[k], top1)
-                    print(f'best_stat: {best_stat_print}')  # global best
-
-                    if best_stat['epoch'] == epoch and self.output_dir:
+                if best_stat[k] > top1:
+                    best_stat_print['epoch'] = epoch
+                    top1 = best_stat[k]
+                    if self.output_dir:
                         if epoch >= self.train_dataloader.collate_fn.stop_epoch:
-                            if test_stats[k][0] > top1:
-                                top1 = test_stats[k][0]
-                                dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg2.pth')
-                                dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
+                            dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg2.pth')
                         else:
-                            top1 = max(test_stats[k][0], top1)
                             dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg1.pth')
-                            dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
+                        dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
 
-                    elif epoch >= self.train_dataloader.collate_fn.stop_epoch:
-                        best_stat = {'epoch': -1, }
-                        self.ema.decay -= 0.0001
-                        self.load_resume_state(str(self.output_dir / 'best_stg1.pth'))
-                        print(f'Refresh EMA at epoch {epoch} with decay {self.ema.decay}')
+                best_stat_print[k] = max(best_stat[k], top1)
+                print(f'best_stat: {best_stat_print}')  # global best
+
+                if best_stat['epoch'] == epoch and self.output_dir:
+                    if epoch >= self.train_dataloader.collate_fn.stop_epoch:
+                        if test_stats[k][0] > top1:
+                            top1 = test_stats[k][0]
+                            dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg2.pth')
+                            dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
+                    else:
+                        top1 = max(test_stats[k][0], top1)
+                        dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg1.pth')
+                        dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best.pth')
+
+                elif epoch >= self.train_dataloader.collate_fn.stop_epoch:
+                    best_stat = {'epoch': -1, }
+                    self.ema.decay -= 0.0001
+                    self.load_resume_state(str(self.output_dir / 'best_stg1.pth'))
+                    print(f'Refresh EMA at epoch {epoch} with decay {self.ema.decay}')
 
 
             log_stats = {
