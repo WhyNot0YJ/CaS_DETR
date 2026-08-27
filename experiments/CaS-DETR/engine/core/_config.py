@@ -82,6 +82,7 @@ class BaseConfig(object):
         self.checkpoint_freq :int = 1
         self.eval_freq :int = 1
         self.eval_at_epochs :List[int] = []
+        self.eval_from_epoch :int = None
         self.last_checkpoint_freq :int = 1
         self.output_dir :str = None
         self.summary_dir :str = None

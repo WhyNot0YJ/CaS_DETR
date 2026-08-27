@@ -2,6 +2,11 @@ print_freq: 100
 output_dir: './logs'
 checkpoint_freq: 12
 
+# Validate every five epochs before no-augmentation, then every epoch.
+eval_freq: 5
+eval_from_epoch: 120
+last_checkpoint_freq: 5
+
 
 sync_bn: True
 find_unused_parameters: False

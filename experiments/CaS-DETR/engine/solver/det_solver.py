@@ -38,9 +38,10 @@ from .det_engine import train_one_epoch, evaluate
 from ..optim.lr_scheduler import FlatCosineLRScheduler
 
 
-def _should_run_epoch(epoch, total_epochs, frequency, extra_epochs=()):
+def _should_run_epoch(epoch, total_epochs, frequency, extra_epochs=(), from_epoch=None):
     return (
         epoch == total_epochs - 1
+        or (from_epoch is not None and epoch >= from_epoch)
         or epoch in extra_epochs
         or (epoch + 1) % max(1, frequency) == 0
     )
@@ -69,7 +70,10 @@ class DetSolver(BaseSolver):
         top1 = 0
         best_stat = {'epoch': -1, }
         # evaluate again before resume training
-        if self.last_epoch > 0:
+        if self.last_epoch > 0 and _should_run_epoch(
+            self.last_epoch, args.epoches, args.eval_freq, args.eval_at_epochs,
+            args.eval_from_epoch,
+        ):
             module = self.ema.module if self.ema else self.model
             test_stats, coco_evaluator = evaluate(
                 module,
@@ -150,7 +154,8 @@ class DetSolver(BaseSolver):
                     dist_utils.save_on_master(self.state_dict(), checkpoint_path)
 
             should_evaluate = _should_run_epoch(
-                epoch, args.epoches, args.eval_freq, args.eval_at_epochs
+                epoch, args.epoches, args.eval_freq, args.eval_at_epochs,
+                args.eval_from_epoch,
             )
             test_stats, coco_evaluator = {}, None
             if should_evaluate:
