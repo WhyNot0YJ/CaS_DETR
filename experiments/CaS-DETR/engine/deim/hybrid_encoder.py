@@ -353,6 +353,7 @@ class HybridEncoder(nn.Module):
                  cass_dynamic_warmup_epochs=0,
                  cass_static_keep_eval=False,
                  cass_predictor_variant='linear',
+                 enable_sg_ccff=False,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -371,6 +372,11 @@ class HybridEncoder(nn.Module):
         self.cass_dynamic_warmup_epochs = int(cass_dynamic_warmup_epochs or 0)
         self.cass_static_keep_eval = bool(cass_static_keep_eval)
         self.cass_predictor_variant = str(cass_predictor_variant or 'linear').lower()
+        self.enable_sg_ccff = bool(enable_sg_ccff)
+        if self.enable_sg_ccff and not self.use_cass:
+            raise ValueError('SG-CCFF requires enable_cas_predictor=True and use_cass=True')
+        self.sg_ccff_alpha = nn.Parameter(torch.zeros(len(in_channels) - 1)) \
+            if self.enable_sg_ccff else None
         self._epoch = 0
 
         # channel projection
@@ -557,6 +563,7 @@ class HybridEncoder(nn.Module):
             'importance_scores_list': [],
             'feat_shapes_list': [],
         }
+        sg_ccff_guide = None
 
         # encoder
         if self.num_encoder_layers > 0:
@@ -564,6 +571,7 @@ class HybridEncoder(nn.Module):
                 h, w = proj_feats[enc_ind].shape[2:]
                 # flatten [B, C, H, W] to [B, HxW, C]
                 src_flatten = proj_feats[enc_ind].flatten(2).permute(0, 2, 1)
+                src_flatten_raw = src_flatten
                 total_tokens = src_flatten.shape[1]
                 if self.training or self.eval_spatial_size is None:
                     pos_embed = self.build_2d_sincos_position_embedding(
@@ -635,6 +643,16 @@ class HybridEncoder(nn.Module):
                     memory, kept_indices, total_tokens, self.hidden_dim,
                     valid_token_mask=valid_token_mask,
                 )
+                is_p5 = enc_ind == len(proj_feats) - 1
+                if self.enable_sg_ccff and is_p5 and kept_indices is not None:
+                    keep_mask = self._scatter_tokens_to_grid(
+                        torch.ones_like(src_flatten[..., :1]), kept_indices,
+                        total_tokens, 1, valid_token_mask=valid_token_mask,
+                    )
+                    memory = memory + src_flatten_raw * (1.0 - keep_mask)
+                scores = prune_info.get('token_importance_scores')
+                if self.enable_sg_ccff and is_p5 and scores is not None:
+                    sg_ccff_guide = torch.sigmoid(scores.detach()).reshape(-1, 1, h, w)
                 proj_feats[enc_ind] = memory.permute(0, 2, 1).reshape(-1, self.hidden_dim, h, w).contiguous()
 
         # broadcasting and fusion
@@ -645,6 +663,12 @@ class HybridEncoder(nn.Module):
             feat_heigh = self.lateral_convs[len(self.in_channels) - 1 - idx](feat_heigh)
             inner_outs[0] = feat_heigh
             upsample_feat = F.interpolate(feat_heigh, scale_factor=2., mode='nearest')
+            if sg_ccff_guide is not None:
+                guide = F.interpolate(
+                    sg_ccff_guide, size=feat_low.shape[-2:], mode='bilinear', align_corners=False
+                )
+                alpha = self.sg_ccff_alpha[len(self.in_channels) - 1 - idx]
+                feat_low = feat_low * (1.0 + alpha * guide)
             inner_out = self.fpn_blocks[len(self.in_channels)-1-idx](torch.concat([upsample_feat, feat_low], dim=1))
             inner_outs.insert(0, inner_out)
 

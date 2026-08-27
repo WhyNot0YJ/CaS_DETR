@@ -31,9 +31,9 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   RTDETR_TUNING_CKPT=/path/to.pth ./run_batch_experiments.sh --yes --rtdetrv2
 #   ./run_batch_experiments.sh --dairv2x --rtdetrv2          # 仅 DAIR-V2X 的 RT-DETR v2
 #   ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac
-#                                                               # DEIM baseline vs. CaS 主实验：Dense 首层 + 后两层 MoE
+#                                                               # DEIM baseline vs. stage-1 MoE/PG-MoE
 #   ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only
-#   ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x（4x 宽度匹配自动 upcycle，其余随机）
+#   ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # 容量消融（当前暂时停用）
 #   ./run_batch_experiments.sh --cas-all-train --dairv2x       # 所有 DAIR CaS 训练组（不含 native DEIM）
 #   ./run_batch_experiments.sh --dqm_detr                      # 只运行 DQM-DETR 全部消融+主实验（消融子组 + 主实验 × 2 协议）
 #   ./run_batch_experiments.sh --dqm_module_ablation           # 只运行 DQM 模块消融（all_off / wo_dqm / wo_qmqc / degradation_only）
@@ -50,7 +50,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数
 #   ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）
-#   ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X 最小主实验：DEIM、Sparse、CaS、CaS + PG-MoE
+#   ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X 第一阶段：MoE 2x vs PG-MoE 2x
 #   ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2，等价 --rtdetrv2
 #   ./run_batch_experiments.sh --test --rtdetrv2               # 测试模式只跑官方 RT-DETRv2（2 epoch + cas-eval）
 #   ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验（2 epoch smoke test）
@@ -304,25 +304,19 @@ declare -A RTDETRV2_ADAPTER_CONFIGS=(
 
 # CaS-DETR paper-aligned experiment plan.  Native DEIM is intentionally not
 # mirrored as an all-off CaS config; run it with --deim under the same protocol.
-# Main experiments: the active vanilla and PG-MoE CaS variants.
+# Stage 1 main experiments: validate PG routing before adding CASS + SG-CCFF.
 declare -a CAS_MAIN_EXPERIMENTS=(
-    "CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml"
+    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml"
 )
 
 declare -a CAS_COMPONENT_ABLATION_EXPERIMENTS=(
     "CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
 )
 
-# E=4 and top-k=2 stay fixed.  Capacity scans remain separate from the hybrid
-# main decoder and therefore include their own .5x/1x/2x/4x anchors.
-# All four arms use random (Xavier) expert init, so width is the only variable.
-declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap4x_dynamic03_hgnetv2_s_dairv2x.yml"
-)
+# Capacity scan is kept for later; do not include it in the current queue until
+# the PG-MoE/SG-CCFF capacity policy is finalized.
+declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=()
 
 # MoE expert initialization is built into the tuning load: width-matched
 # experts (the 4x anchor) are upcycled from the pretrained dense FFN with a 1%
@@ -330,20 +324,21 @@ declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=(
 # Set `moe_symmetry_break_std: 0` in a config to force random initialization.
 
 declare -A CAS_EXPERIMENT_CONFIGS=(
-    ["cas-main-vanilla-moe-dairv2x"]="CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml"
-    ["cas-main-pg-moe-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_hgnetv2_s_dairv2x.yml"
+    ["cas-main-moe-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml"
+    ["cas-main-pg-moe-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml"
     ["cas-component-token-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
-    ["cas-moe-cap05x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap05x_dynamic03_hgnetv2_s_dairv2x.yml"
-    ["cas-moe-cap1x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
-    ["cas-moe-cap2x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap2x_dynamic03_hgnetv2_s_dairv2x.yml"
-    ["cas-moe-cap4x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_moe4_cap4x_dynamic03_hgnetv2_s_dairv2x.yml"
+    # Capacity entries are intentionally disabled pending the PG-MoE decision:
+    # ["cas-moe-cap1x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_pg_moe_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
+    # ["cas-moe-cap2x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_pg_moe_cap2x_dynamic03_hgnetv2_s_dairv2x.yml"
+    # ["cas-moe-cap4x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_pg_moe_cap4x_dynamic03_hgnetv2_s_dairv2x.yml"
 )
 
 cas_result_group() {
     case "$1" in
         CaS-DETR/configs/dataset/main/*) echo "main" ;;
+        *cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml|*cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml) echo "main" ;;
         *cas_detr_token_only_*) echo "component_ablation" ;;
-        *cas_detr_moe4_cap05x_*|*cas_detr_moe4_cap1x_*|*cas_detr_moe4_cap2x_*|*cas_detr_moe4_cap4x_*) echo "moe_capacity" ;;
+        *cas_detr_pg_moe_cap1x_*|*cas_detr_pg_moe_cap2x_*|*cas_detr_pg_moe_cap4x_*|*cas_detr_moe4_cap05x_*|*cas_detr_moe4_cap1x_*|*cas_detr_moe4_cap2x_*|*cas_detr_moe4_cap4x_*) echo "moe_capacity" ;;
         *) echo "" ;;
     esac
 }
@@ -471,12 +466,10 @@ declare -A DFINE_CONFIGS=(
     ["dfine-s-uadetrac"]="D-FINE/configs/dfine/dfine_hgnetv2_s_uadetrac_no_decoder_ffn_pretrain.yml"
 )
 
-# DAIR-V2X 最小主实验矩阵：仅逐步打开 Sparse、MoE、PG-MoE。
+# DAIR-V2X 第一阶段主实验：先验证 2x MoE 与 PG-MoE，再决定是否加入 CASS + SG-CCFF。
 declare -a CURRENT_MAIN_EXPERIMENTS=(
-    "DEIM/configs/deim_dfine/deim_hgnetv2_s_dairv2x_no_decoder_ffn_pretrain.yml"  # DEIM: no Sparse, no MoE
-    "CaS-DETR/configs/deim_dfine/minimal_sparse_hgnetv2_s_dairv2x.yml"  # Sparse only
-    "CaS-DETR/configs/deim_dfine/minimal_cas_vanilla_moe_hgnetv2_s_dairv2x.yml"  # CaS: Sparse + Vanilla MoE
-    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_hgnetv2_s_dairv2x.yml"  # CaS + PG-MoE
+    "CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml"  # MoE 2x, no PG/CASS/SG
+    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml"  # PG-MoE 2x, no CASS/SG
 )
 
 # 构建全部配置列表与名称映射
@@ -1232,7 +1225,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac  # DEIM baseline 与 CaS 主实验"
         echo "  ./run_batch_experiments.sh --cas-main --dataset dairv2x,uadetrac  # CaS 主实验"
         echo "  ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only"
-        echo "  ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # DAIR 全三层 MoE 容量 .5x/1x/2x/4x（Xavier 随机初始化）"
+        echo "  ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # 容量消融（当前暂时停用）"
         echo "  ./run_batch_experiments.sh --cas-all-train --dairv2x       # 全部 DAIR CaS 训练组"
         echo "  ./run_batch_experiments.sh --dqm_detr                      # DQM-DETR 全部消融+主实验（2 协议 × 消融 + 主实验）"
         echo "  ./run_batch_experiments.sh --dqm_module_ablation           # 仅 DQM 模块消融（all_off / wo_dqm / wo_qmqc / degradation_only）"
@@ -1250,7 +1243,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）"
         echo "  ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数"
         echo "  ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）"
-        echo "  ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X 最小主实验：DEIM、Sparse、CaS、CaS + PG-MoE"
+        echo "  ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X 第一阶段：MoE 2x vs PG-MoE 2x"
         echo "  ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验"
         echo "  ./run_batch_experiments.sh --test --dqm_detr               # 测试模式：DQM 全部消融+主实验"
@@ -1297,6 +1290,42 @@ parse_arguments() {
 }
 
 # 运行单个实验
+yolo_run_completed() {
+    local run_dir="$1"
+    [ -f "$run_dir/training.log" ] && rg -q '训练完成！|训练完成!' "$run_dir/training.log"
+}
+
+yolo_find_incomplete_checkpoint() {
+    local dataset_dir="$1"
+    local yolo_prefix="$2"
+    local best_checkpoint=""
+    local best_epoch=-1
+    local run_dir epoch
+
+    for run_dir in "$dataset_dir"/"${yolo_prefix}"*/; do
+        [ -d "$run_dir" ] || continue
+        [ -f "$run_dir/weights/last.pt" ] || continue
+        yolo_run_completed "$run_dir" && continue
+        epoch=$(awk -F, 'NR > 1 { value = $1 + 0 } END { print value + 0 }' "$run_dir/results.csv" 2>/dev/null || echo -1)
+        if [ "$epoch" -gt "$best_epoch" ]; then
+            best_epoch="$epoch"
+            best_checkpoint="$run_dir/weights/last.pt"
+        fi
+    done
+    printf '%s' "$best_checkpoint"
+}
+
+yolo_find_completed_run() {
+    local dataset_dir="$1"
+    local yolo_prefix="$2"
+    local run_dir
+    for run_dir in "$dataset_dir"/"${yolo_prefix}"*/; do
+        [ -d "$run_dir" ] || continue
+        yolo_run_completed "$run_dir" && { printf '%s' "${run_dir%/}"; return 0; }
+    done
+    return 0
+}
+
 run_single_experiment() {
     local config_path_raw=$1
     local dataset_name="${2:-}"
@@ -1576,18 +1605,15 @@ run_single_experiment() {
         local FRCNN_DS="$experiment_protocol"
         "$PYTHON_BIN" train_fasterrcnn.py --config "../$config_path" --dataset "$FRCNN_DS"
     elif [ -n "$YOLO_VERSION" ] && [ "$TEST_MODE" = true ]; then
+        local yolo_log_root="$SCRIPT_DIR/yolo/logs"
+        local yolo_dataset_dir="$yolo_log_root/$experiment_protocol"
+        local yolo_prefix="yolo_${exp_name%%_*}_"
         if [ "${SKIP_COMPLETED_YOLO_RUNS:-1}" = "1" ]; then
-            local yolo_log_root="$SCRIPT_DIR/yolo/logs"
-            local yolo_dataset_dir="$yolo_log_root/dairv2x"
-            yolo_dataset_dir="$yolo_log_root/$experiment_protocol"
             # Historical YOLO run directories use the model-only prefix
             # (e.g. yolo_yolov5m_<timestamp>), while queue keys include the
             # dataset suffix (yolov5m_dairv2x). Match the stable model name.
-            local yolo_prefix="yolo_${exp_name%%_*}_"
             local completed_run
-            completed_run=$(find "$yolo_dataset_dir" -maxdepth 1 -type d -name "${yolo_prefix}*" 2>/dev/null | while read -r d; do
-                [ -f "$d/args.yaml" ] && [ -f "$d/config.yaml" ] && [ -d "$d/weights" ] && find "$d/weights" -mindepth 1 -maxdepth 1 | read -r _ && printf '%s\n' "$d" && break
-            done)
+            completed_run=$(yolo_find_completed_run "$yolo_dataset_dir" "$yolo_prefix")
             if [ -n "$completed_run" ]; then
                 log_warning "跳过已完成的 YOLO 实验: $exp_display -> $completed_run"
                 SKIPPED_EXPERIMENTS=$((SKIPPED_EXPERIMENTS + 1))
@@ -1596,17 +1622,23 @@ run_single_experiment() {
         fi
         local yolo_dataset_args=()
         yolo_dataset_args=("--${experiment_protocol//_/-}")
-        "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" "${yolo_dataset_args[@]}" --epochs 2
+        local yolo_resume_checkpoint=""
+        if [ "${YOLO_RESUME:-1}" = "1" ]; then
+            yolo_resume_checkpoint=$(yolo_find_incomplete_checkpoint "$yolo_dataset_dir" "yolo_${exp_name%%_*}_")
+        fi
+        if [ -n "$yolo_resume_checkpoint" ]; then
+            log_info "YOLO 续训: $exp_display <- $yolo_resume_checkpoint"
+            YOLO_VERBOSE="${YOLO_VERBOSE:-False}" "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" "${yolo_dataset_args[@]}" --resume_from_checkpoint "$yolo_resume_checkpoint" --epochs 2
+        else
+            YOLO_VERBOSE="${YOLO_VERBOSE:-False}" "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" "${yolo_dataset_args[@]}" --epochs 2
+        fi
     elif [ -n "$YOLO_VERSION" ]; then
+        local yolo_log_root="$SCRIPT_DIR/yolo/logs"
+        local yolo_dataset_dir="$yolo_log_root/$experiment_protocol"
+        local yolo_prefix="yolo_${exp_name%%_*}_"
         if [ "${SKIP_COMPLETED_YOLO_RUNS:-1}" = "1" ]; then
-            local yolo_log_root="$SCRIPT_DIR/yolo/logs"
-            local yolo_dataset_dir="$yolo_log_root/dairv2x"
-            yolo_dataset_dir="$yolo_log_root/$experiment_protocol"
-            local yolo_prefix="yolo_${exp_name%%_*}_"
             local completed_run
-            completed_run=$(find "$yolo_dataset_dir" -maxdepth 1 -type d -name "${yolo_prefix}*" 2>/dev/null | while read -r d; do
-                [ -f "$d/args.yaml" ] && [ -f "$d/config.yaml" ] && [ -d "$d/weights" ] && find "$d/weights" -mindepth 1 -maxdepth 1 | read -r _ && printf '%s\n' "$d" && break
-            done)
+            completed_run=$(yolo_find_completed_run "$yolo_dataset_dir" "$yolo_prefix")
             if [ -n "$completed_run" ]; then
                 log_warning "跳过已完成的 YOLO 实验: $exp_display -> $completed_run"
                 SKIPPED_EXPERIMENTS=$((SKIPPED_EXPERIMENTS + 1))
@@ -1615,7 +1647,16 @@ run_single_experiment() {
         fi
         local yolo_dataset_args=()
         yolo_dataset_args=("--${experiment_protocol//_/-}")
-        "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" "${yolo_dataset_args[@]}"
+        local yolo_resume_checkpoint=""
+        if [ "${YOLO_RESUME:-1}" = "1" ]; then
+            yolo_resume_checkpoint=$(yolo_find_incomplete_checkpoint "$yolo_dataset_dir" "yolo_${exp_name%%_*}_")
+        fi
+        if [ -n "$yolo_resume_checkpoint" ]; then
+            log_info "YOLO 续训: $exp_display <- $yolo_resume_checkpoint"
+            YOLO_VERBOSE="${YOLO_VERBOSE:-False}" "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" "${yolo_dataset_args[@]}" --resume_from_checkpoint "$yolo_resume_checkpoint"
+        else
+            YOLO_VERBOSE="${YOLO_VERBOSE:-False}" "$PYTHON_BIN" train.py --version "$YOLO_VERSION" --config "../$config_path" "${yolo_dataset_args[@]}"
+        fi
     elif [ "$TEST_MODE" = true ]; then
         "$PYTHON_BIN" train.py --config "../$config_path" --epochs 2
     else

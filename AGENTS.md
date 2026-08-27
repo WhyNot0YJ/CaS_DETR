@@ -46,9 +46,11 @@ DAWN 跨域评测只允许使用 DAIR-V2X 八类 checkpoint。
 
 ## 训练、评测与测速口径
 
-- 运行、验证和 GPU/TensorRT 相关操作统一通过仓库根目录的 `./run_rtdetr.sh` 进入
-  `rtdetr_dev` 容器；不要使用宿主机系统 Python。容器内工作目录固定为
-  `/root/autodl-tmp/CaS_DETR`，使用镜像内的 `python`。
+- 运行、验证和 GPU/TensorRT 相关操作按以下顺序选择环境：先检查仓库上一层的
+  `/root/autodl-tmp/cas_trt_env/bin/python`；该环境可用时，训练、评测、YOLO 批处理、
+  TensorRT 和邮件通知统一使用它，禁止改用系统 Python。只有该环境不可用或缺少所需
+  依赖时，才检查 Docker，并通过仓库根目录的 `./run_rtdetr.sh` 进入 `rtdetr_dev`
+  容器，使用容器内的 `python`。容器内工作目录固定为 `/root/autodl-tmp/CaS_DETR`。
 - 新增训练入口必须支持两协议路由，并将协议传递到数据集、输出和报告路径。
 - TensorRT FP16 是正式速度口径；PyTorch FPS 仅作诊断。
 - `model` FPS 只表示固定设备输入到模型输出；`end-to-end` 必须包含图像读取、预处理、
