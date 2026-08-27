@@ -80,8 +80,8 @@ def parse_args():
     p.add_argument("--images", type=Path, required=True)
     p.add_argument("--trtexec", default="trtexec")
     p.add_argument("--builder", choices=("auto", "trtexec", "python"), default="auto")
-    p.add_argument("--caip-static-keep-eval", action="store_true")
-    p.add_argument("--caip-eval-keep-ratio", type=float)
+    p.add_argument("--cass-static-keep-eval", action="store_true")
+    p.add_argument("--cass-eval-keep-ratio", type=float)
     p.add_argument("--warmup", type=int, default=100)
     p.add_argument("--iterations", type=int, default=1000)
     return p.parse_args()
@@ -101,8 +101,8 @@ def main():
         export_options={
             "imgsz": 640,
             "batch": 1,
-            "caip_static_keep_eval": bool(args.caip_static_keep_eval),
-            "caip_eval_keep_ratio": args.caip_eval_keep_ratio,
+            "cass_static_keep_eval": bool(args.cass_static_keep_eval),
+            "cass_eval_keep_ratio": args.cass_eval_keep_ratio,
         },
     )
     artifact_stem = f"{args.model}_{artifact_hash_suffix(provenance)}"
@@ -117,10 +117,10 @@ def main():
         "--config", str(args.config), "--checkpoint", str(args.checkpoint), "--output", str(onnx),
     ]
     export_command.extend(("--dataset-protocol", args.dataset_protocol))
-    if args.caip_static_keep_eval:
-        export_command.append("--caip-static-keep-eval")
-    if args.caip_eval_keep_ratio is not None:
-        export_command.extend(("--caip-eval-keep-ratio", str(args.caip_eval_keep_ratio)))
+    if args.cass_static_keep_eval:
+        export_command.append("--cass-static-keep-eval")
+    if args.cass_eval_keep_ratio is not None:
+        export_command.extend(("--cass-eval-keep-ratio", str(args.cass_eval_keep_ratio)))
     use_trtexec = args.builder == "trtexec" or (
         args.builder == "auto" and shutil.which(args.trtexec) is not None
     )

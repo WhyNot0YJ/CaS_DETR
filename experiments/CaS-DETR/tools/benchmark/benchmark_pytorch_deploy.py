@@ -61,8 +61,8 @@ def build_model(framework, config_path, checkpoint_path):
     model = cfg.model
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     model.load_state_dict(load_state(checkpoint), strict=True)
-    if framework == "casdeim" and hasattr(model.encoder, "caip_static_keep_eval"):
-        model.encoder.caip_static_keep_eval = True
+    if framework == "casdeim" and hasattr(model.encoder, "cass_static_keep_eval"):
+        model.encoder.cass_static_keep_eval = True
     return model.deploy(), cfg.postprocessor.deploy()
 
 

@@ -1,8 +1,8 @@
 HybridEncoder:
   enable_cas_predictor: True
   token_keep_ratio: 0.3
-  use_caip: True
   use_cass: True
+  use_dynamic: True
   cass_expansion_ratio: 0.8
   cass_min_size: 1.0
   cass_decay_type: gaussian
@@ -10,8 +10,7 @@ HybridEncoder:
   cass_loss_type: vfl
   cass_focal_alpha: 2.0
   cass_focal_beta: 4.0
-  caip_reduction_ratio: 4
-  caip_complexity_alpha: 1.0
+  cass_complexity_alpha: 1.0
 
 DFINETransformer:
   use_moe: True
