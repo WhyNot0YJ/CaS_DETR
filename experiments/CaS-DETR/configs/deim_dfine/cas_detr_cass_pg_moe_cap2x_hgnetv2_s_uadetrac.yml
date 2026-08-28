@@ -1,0 +1,11 @@
+__include__: [
+  './cas_detr_cass_moe_cap2x_hgnetv2_s_uadetrac.yml'
+]
+
+# CASS + position-guided 2x MoE.
+output_dir: ./outputs/uadetrac/main/cas_detr_cass_pg_moe_cap2x_hgnetv2_s
+
+DFINETransformer:
+  pg_enabled: True
+  pg_hidden_dim: 32
+  pg_scale: 1.0

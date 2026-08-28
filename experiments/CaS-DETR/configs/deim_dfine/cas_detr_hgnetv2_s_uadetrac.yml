@@ -1,0 +1,21 @@
+__include__: [
+  './deim_hgnetv2_s_uadetrac.yml',
+  '../base/cas_deim.yml'
+]
+
+output_dir: ./outputs/uadetrac/cas_detr_hgnetv2_s
+
+HybridEncoder:
+  token_keep_ratio: 0.3
+  use_cass: True
+  cass_complexity_alpha: 1.0
+  cass_dynamic_warmup_epochs: 4
+
+DFINETransformer:
+  use_moe: True
+  num_experts: 4
+  moe_top_k: 2
+  dim_feedforward: 128
+
+DEIMCriterion:
+  decoder_moe_balance_weight: 0.005
