@@ -72,6 +72,7 @@ experiments/**/logs/**/*.csv
 experiments/**/logs/**/*.log
 experiments/**/logs/**/*.png
 experiments/**/logs/**/*.yaml
+experiments/**/logs/**/*.pid
 # Temporary files
 tmp/
 temp/

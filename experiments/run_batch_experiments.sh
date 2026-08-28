@@ -1292,7 +1292,7 @@ parse_arguments() {
 # 运行单个实验
 yolo_run_completed() {
     local run_dir="$1"
-    [ -f "$run_dir/training.log" ] && rg -q '训练完成！|训练完成!' "$run_dir/training.log"
+    [ -f "$run_dir/training.log" ] && grep -qE '训练完成！|训练完成!' "$run_dir/training.log"
 }
 
 yolo_find_incomplete_checkpoint() {

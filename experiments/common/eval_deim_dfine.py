@@ -1086,7 +1086,7 @@ def main():
         )
         append_csv = True
         wrote_any = True
-        if split_name == "test":
+        if split_name == "test" or split_name == primary_split:
             test_metrics = metrics
 
         # Top-300 DETR prediction lists are large. Release each split before
@@ -1133,7 +1133,7 @@ def main():
     return {
         "output_dir": str(output_dir.resolve()),
         "metrics": test_metrics,
-        "metric_source": f"{csv_path} (test)",
+        "metric_source": f"{csv_path} ({primary_split})",
     }
 
 
