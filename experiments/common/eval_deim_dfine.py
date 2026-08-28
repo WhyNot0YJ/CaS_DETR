@@ -403,6 +403,8 @@ def _resolve_test_ann_file(ann_file: str) -> Optional[str]:
     ann_path = Path(ann_file)
     candidates = []
     name = ann_path.name
+    if name == "instances_test.json":
+        candidates.append(ann_path)
     if "instances_val" in name:
         candidates.append(ann_path.with_name(name.replace("instances_val", "instances_test")))
     if "instances_train" in name:
