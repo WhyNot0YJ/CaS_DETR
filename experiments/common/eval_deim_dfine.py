@@ -35,6 +35,7 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 from common.det_eval_metrics import (
     coco_ap_at_iou50_all,
+    coco_area_ap_excluding_categories,
     coco_area_ap_at_iou50,
     canonical_category_metric_name,
     compute_weather_subset_metrics,
@@ -561,6 +562,35 @@ def _is_dair_dataset(dataset_name: str) -> bool:
     return "dair" in low or "dairv2x" in low
 
 
+def _is_uadetrac_dataset(dataset_name: str) -> bool:
+    low = dataset_name.lower()
+    return "uadetrac" in low or "ua-detrac" in low or "ua_detrac" in low
+
+
+# Listed categories have fewer than 20 small ground-truth instances in the
+# respective test set. The official COCO AP_small remains unchanged.
+DAIR_SMALL_EXCLUDED_CATEGORIES = ("bus", "truck")
+DAIR_SMALL_DIAGNOSTIC_KEYS = (
+    "AP_small_50_excl_bus_truck",
+    "AP_small_5095_excl_bus_truck",
+)
+UADETRAC_SMALL_EXCLUDED_CATEGORIES = ("bus",)
+UADETRAC_SMALL_DIAGNOSTIC_KEYS = (
+    "AP_small_50_excl_bus",
+    "AP_small_5095_excl_bus",
+)
+
+
+def small_object_diagnostic_spec(
+    dataset_name: str,
+) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    if _is_dair_dataset(dataset_name):
+        return DAIR_SMALL_EXCLUDED_CATEGORIES, DAIR_SMALL_DIAGNOSTIC_KEYS
+    if _is_uadetrac_dataset(dataset_name):
+        return UADETRAC_SMALL_EXCLUDED_CATEGORIES, UADETRAC_SMALL_DIAGNOSTIC_KEYS
+    return (), ()
+
+
 def compute_cas_metrics(
     ann_file: str,
     predictions: List[Dict],
@@ -602,6 +632,16 @@ def compute_cas_metrics(
 
     per50, per5095 = extract_per_category_ap_from_coco_eval(ce, categories)
     small50, small5095 = extract_per_category_ap_from_coco_eval(ce, categories, area_index=1)
+    small_excluded_categories, small_diagnostic_keys = small_object_diagnostic_spec(dataset_name)
+    if small_excluded_categories:
+        small50_excl, small5095_excl = coco_area_ap_excluding_categories(
+            ce,
+            categories,
+            small_excluded_categories,
+            area_index=1,
+        )
+        metrics[small_diagnostic_keys[0]] = small50_excl
+        metrics[small_diagnostic_keys[1]] = small5095_excl
     for name, v in per50.items():
         metrics[f"AP50_{canonical_category_metric_name(name)}"] = v
     for name, v in per5095.items():
@@ -1083,6 +1123,9 @@ def main():
             benchmark=bench_dict,
             weather_buckets=weather_buckets or None,
             metadata=metadata,
+            diagnostic_metric_keys=[
+                key for key in small_object_diagnostic_spec(dataset_name)[1] if key in metrics
+            ],
         )
         append_csv = True
         wrote_any = True

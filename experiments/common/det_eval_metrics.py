@@ -78,6 +78,43 @@ def coco_area_ap_at_iou50(coco_eval) -> Tuple[float, float, float]:
     return out[0], out[1], out[2]
 
 
+def coco_area_ap_excluding_categories(
+    coco_eval: Any,
+    categories: List[Dict[str, Any]],
+    excluded_categories: List[str] | Tuple[str, ...],
+    *,
+    area_index: int = 1,
+) -> Tuple[float, float]:
+    """Return AP@0.5 and AP@0.5:0.95 for one area bucket after exclusions."""
+    if coco_eval is None or coco_eval.eval is None or "precision" not in coco_eval.eval:
+        return 0.0, 0.0
+
+    precision = coco_eval.eval["precision"]
+    if precision.size == 0:
+        return 0.0, 0.0
+
+    excluded = {canonical_category_metric_name(name) for name in excluded_categories}
+    cat_id_to_index = {cat_id: idx for idx, cat_id in enumerate(coco_eval.params.catIds)}
+    category_indices = [
+        cat_id_to_index[category["id"]]
+        for category in categories
+        if category["id"] in cat_id_to_index
+        and canonical_category_metric_name(category["name"]) not in excluded
+    ]
+    if not category_indices:
+        return 0.0, 0.0
+
+    max_det_index = precision.shape[4] - 1
+    p50 = precision[0, :, category_indices, area_index, max_det_index]
+    p5095 = precision[:, :, category_indices, area_index, max_det_index]
+    p50 = p50[p50 > -1]
+    p5095 = p5095[p5095 > -1]
+    return (
+        float(np.mean(p50)) if p50.size > 0 else 0.0,
+        float(np.mean(p5095)) if p5095.size > 0 else 0.0,
+    )
+
+
 def extract_per_category_ap_from_coco_eval(
     coco_eval: Any,
     categories: List[Dict[str, Any]],
@@ -270,13 +307,13 @@ EVAL_CSV_FIELDS: List[str] = [
     "eval_split",
     "mAP_50",
     "mAP_5095",
-    "AP_small_50",
     "AP_medium_50",
     "AP_large_50",
-    "AP_small_5095",
     "AP_medium_5095",
     "AP_large_5095",
 ]
+
+SUPPRESSED_AGGREGATE_SMALL_FIELDS = ("AP_small_50", "AP_small_5095")
 
 BENCHMARK_CSV_FIELDS: List[str] = [
     "Params_M",
@@ -308,6 +345,7 @@ def write_eval_csv(
     benchmark: Optional[Dict[str, float]] = None,
     weather_buckets: Optional[List[str]] = None,
     metadata: Optional[Dict[str, object]] = None,
+    diagnostic_metric_keys: Optional[List[str]] = None,
 ) -> None:
     """
     将一行评估指标写入 CSV。
@@ -325,10 +363,8 @@ def write_eval_csv(
     key_map = {
         "mAP_50": ("mAP_50", "mAP_0.5"),
         "mAP_5095": ("mAP_5095", "mAP_0.5_0.95"),
-        "AP_small_50": ("AP_small_50",),
         "AP_medium_50": ("AP_medium_50",),
         "AP_large_50": ("AP_large_50",),
-        "AP_small_5095": ("AP_small_5095", "AP_small"),
         "AP_medium_5095": ("AP_medium_5095", "AP_medium"),
         "AP_large_5095": ("AP_large_5095", "AP_large"),
     }
@@ -344,6 +380,9 @@ def write_eval_csv(
         for bucket in weather_buckets:
             fieldnames.append(f"weather_{bucket}_mAP_50")
             fieldnames.append(f"weather_{bucket}_mAP_5095")
+    for key in diagnostic_metric_keys or []:
+        if key not in fieldnames:
+            fieldnames.append(key)
     fieldnames.extend(BENCHMARK_CSV_FIELDS)
 
     row: Dict[str, str] = {
@@ -378,6 +417,10 @@ def write_eval_csv(
             row[f"weather_{bucket}_mAP_50"] = f"{float(v50):.6f}" if isinstance(v50, (int, float)) else str(v50)
             row[f"weather_{bucket}_mAP_5095"] = f"{float(v5095):.6f}" if isinstance(v5095, (int, float)) else str(v5095)
 
+    for key in diagnostic_metric_keys or []:
+        value = metrics.get(key, "")
+        row[key] = f"{float(value):.6f}" if isinstance(value, (int, float)) else str(value)
+
     if benchmark:
         benchmark_key_map = {
             "Inference_FPS": "FPS",
@@ -390,9 +433,14 @@ def write_eval_csv(
     if metadata:
         row = {**metadata, **row}
     if metadata and metadata.get("run_id"):
-        upsert_csv_rows(path, [row], key_fields=("run_id", "eval_split"))
+        upsert_csv_rows(
+            path,
+            [row],
+            key_fields=("run_id", "eval_split"),
+            drop_fields=SUPPRESSED_AGGREGATE_SMALL_FIELDS,
+        )
     else:
-        append_csv_rows(path, [row])
+        append_csv_rows(path, [row], drop_fields=SUPPRESSED_AGGREGATE_SMALL_FIELDS)
 
 
 def dataset_display_name(config: Dict) -> str:

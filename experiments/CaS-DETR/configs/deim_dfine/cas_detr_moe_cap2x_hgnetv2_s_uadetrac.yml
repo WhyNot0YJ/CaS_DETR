@@ -1,0 +1,26 @@
+__include__: [
+  './deim_hgnetv2_s_uadetrac.yml'
+]
+
+# Stage 1: compute-matched vanilla MoE, without PG/CASS/SG-CCFF.
+output_dir: ./outputs/uadetrac/main/cas_detr_moe_cap2x_hgnetv2_s
+
+HybridEncoder:
+  enable_cas_predictor: False
+  use_cass: False
+  use_dynamic: False
+  token_keep_ratio: 1.0
+
+DFINETransformer:
+  use_moe: True
+  num_experts: 4
+  moe_top_k: 2
+  moe_noise_std: 0.1
+  router_init_std: 0.02
+  dim_feedforward: 512
+  pg_enabled: False
+  pg_hidden_dim: 32
+  pg_scale: 1.0
+
+DEIMCriterion:
+  decoder_moe_balance_weight: 0.005

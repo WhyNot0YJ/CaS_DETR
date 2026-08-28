@@ -27,8 +27,8 @@ RESEND_EMAIL_ENDPOINT = "https://api.resend.com/emails"
 METRIC_LABELS = (
     ("map50", "mAP@0.50"),
     ("map5095", "mAP@0.50:0.95"),
-    ("mapsmall50", "AP_small@0.50"),
-    ("mapsmall5095", "AP_small@0.50:0.95"),
+    ("mapsmall50", "AP_small@0.50 (exclude <20 small GT)"),
+    ("mapsmall5095", "AP_small@0.50:0.95 (exclude <20 small GT)"),
 )
 
 
@@ -104,6 +104,8 @@ def _metrics_from_row(row: Mapping[str, object]) -> Dict[str, float]:
             "coco_eval_bbox_0",
         ),
         "mapsmall50": (
+            "ap_small_50_excl_bus_truck",
+            "ap_small_50_excl_bus",
             "mapsmall50",
             "map_small50",
             "map_small_50",
@@ -111,6 +113,8 @@ def _metrics_from_row(row: Mapping[str, object]) -> Dict[str, float]:
             "ap_small_50",
         ),
         "mapsmall5095": (
+            "ap_small_5095_excl_bus_truck",
+            "ap_small_5095_excl_bus",
             "mapsmall5095",
             "map_small5095",
             "map_small_5095",

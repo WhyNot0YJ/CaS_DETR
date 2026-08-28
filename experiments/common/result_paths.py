@@ -35,7 +35,12 @@ def result_csv(kind: str) -> Path:
     return directory / f"{kind}.csv"
 
 
-def append_csv_rows(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
+def append_csv_rows(
+    path: Path,
+    rows: Iterable[Mapping[str, object]],
+    *,
+    drop_fields: Sequence[str] = (),
+) -> None:
     """Append rows and widen the header when a later producer adds columns."""
     rows = [dict(row) for row in rows]
     if not rows:
@@ -44,11 +49,25 @@ def append_csv_rows(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
 
     existing_rows = []
     existing_fields = []
+    existing_file_has_content = path.exists() and path.stat().st_size > 0
     if path.exists() and path.stat().st_size:
         with path.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
             existing_fields = list(reader.fieldnames or [])
             existing_rows = list(reader)
+
+    dropped = set(drop_fields)
+    stored_fields = list(existing_fields)
+    if dropped:
+        existing_fields = [field for field in existing_fields if field not in dropped]
+        existing_rows = [
+            {field: value for field, value in row.items() if field not in dropped}
+            for row in existing_rows
+        ]
+        rows = [
+            {field: value for field, value in row.items() if field not in dropped}
+            for row in rows
+        ]
 
     fields = list(existing_fields)
     for row in rows:
@@ -59,13 +78,17 @@ def append_csv_rows(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
         return
 
     # Rewriting is necessary only when a new column appears; otherwise append.
-    if existing_rows and fields != existing_fields:
+    if existing_file_has_content and fields != stored_fields:
         with path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+            writer = csv.DictWriter(
+                handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n"
+            )
             writer.writeheader()
             writer.writerows(existing_rows)
     with path.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer = csv.DictWriter(
+            handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n"
+        )
         if not existing_rows and (not path.exists() or path.stat().st_size == 0):
             writer.writeheader()
         writer.writerows(rows)
@@ -76,6 +99,7 @@ def upsert_csv_rows(
     rows: Iterable[Mapping[str, object]],
     *,
     key_fields: Sequence[str],
+    drop_fields: Sequence[str] = (),
 ) -> None:
     """Replace rows with the same key instead of duplicating benchmark retries."""
     rows = [dict(row) for row in rows]
@@ -90,6 +114,18 @@ def upsert_csv_rows(
             reader = csv.DictReader(handle)
             fields = list(reader.fieldnames or [])
             existing_rows = list(reader)
+
+    dropped = set(drop_fields)
+    if dropped:
+        fields = [field for field in fields if field not in dropped]
+        existing_rows = [
+            {field: value for field, value in row.items() if field not in dropped}
+            for row in existing_rows
+        ]
+        rows = [
+            {field: value for field, value in row.items() if field not in dropped}
+            for row in rows
+        ]
 
     incoming_keys = {
         tuple(str(row.get(field, "")) for field in key_fields)
@@ -106,7 +142,9 @@ def upsert_csv_rows(
                 fields.append(field)
 
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer = csv.DictWriter(
+            handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(existing_rows)
         writer.writerows(rows)
@@ -137,7 +175,9 @@ def update_csv_rows(
         if field not in fields:
             fields.append(field)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer = csv.DictWriter(
+            handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(rows)
     return count
