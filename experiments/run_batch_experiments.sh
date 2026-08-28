@@ -32,6 +32,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --dairv2x --rtdetrv2          # 仅 DAIR-V2X 的 RT-DETR v2
 #   ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac
 #                                                               # DEIM baseline vs. stage-1 MoE/PG-MoE
+#   ./run_batch_experiments.sh --cas-cass-sg-ccff               # 单独运行 CASS + SG-CCFF（4 配置）
 #   ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only
 #   ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # 容量消融（当前暂时停用）
 #   ./run_batch_experiments.sh --cas-all-train --dairv2x       # 所有 DAIR CaS 训练组（不含 native DEIM）
@@ -302,17 +303,9 @@ declare -A RTDETRV2_ADAPTER_CONFIGS=(
     ["rtdetrv2-r18-uadetrac"]="RT-DETR/rtdetrv2_pytorch/configs/rtdetrv2/rtdetrv2_r18vd_uadetrac_no_decoder_ffn_pretrain.yml@uadetrac"
 )
 
-# CaS-DETR paper-aligned experiment plan.  Native DEIM is intentionally not
+# CaS-DETR paper-aligned experiment plan. Native DEIM is intentionally not
 # mirrored as an all-off CaS config; run it with --deim under the same protocol.
-# Stage 1 main experiments: validate PG routing before adding CASS + SG-CCFF.
-declare -a CAS_MAIN_EXPERIMENTS=(
-    "CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml"
-    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml"
-)
-
-declare -a CAS_COMPONENT_ABLATION_EXPERIMENTS=(
-    "CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
-)
+# Main and ablation paths are registered once in the key map below.
 
 # Capacity scan is kept for later; do not include it in the current queue until
 # the PG-MoE/SG-CCFF capacity policy is finalized.
@@ -326,6 +319,10 @@ declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=()
 declare -A CAS_EXPERIMENT_CONFIGS=(
     ["cas-main-moe-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml"
     ["cas-main-pg-moe-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml"
+    ["cas-main-cass-sg-ccff-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_sg_ccff_cap2x_hgnetv2_s_dairv2x.yml"
+    ["cas-main-cass-pg-moe-sg-ccff-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_pg_moe_sg_ccff_cap2x_hgnetv2_s_dairv2x.yml"
+    ["cas-main-cass-sg-ccff-2x-uadetrac"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_sg_ccff_cap2x_hgnetv2_s_uadetrac.yml"
+    ["cas-main-cass-pg-moe-sg-ccff-2x-uadetrac"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_pg_moe_sg_ccff_cap2x_hgnetv2_s_uadetrac.yml"
     ["cas-component-token-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
     # Capacity entries are intentionally disabled pending the PG-MoE decision:
     # ["cas-moe-cap1x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_pg_moe_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
@@ -336,7 +333,7 @@ declare -A CAS_EXPERIMENT_CONFIGS=(
 cas_result_group() {
     case "$1" in
         CaS-DETR/configs/dataset/main/*) echo "main" ;;
-        *cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml|*cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml) echo "main" ;;
+        *cas_detr_*cap2x_hgnetv2_s_dairv2x.yml|*cas_detr_*cap2x_hgnetv2_s_uadetrac.yml) echo "main" ;;
         *cas_detr_token_only_*) echo "component_ablation" ;;
         *cas_detr_pg_moe_cap1x_*|*cas_detr_pg_moe_cap2x_*|*cas_detr_pg_moe_cap4x_*|*cas_detr_moe4_cap05x_*|*cas_detr_moe4_cap1x_*|*cas_detr_moe4_cap2x_*|*cas_detr_moe4_cap4x_*) echo "moe_capacity" ;;
         *) echo "" ;;
@@ -466,11 +463,7 @@ declare -A DFINE_CONFIGS=(
     ["dfine-s-uadetrac"]="D-FINE/configs/dfine/dfine_hgnetv2_s_uadetrac_no_decoder_ffn_pretrain.yml"
 )
 
-# DAIR-V2X 第一阶段主实验：先验证 2x MoE 与 PG-MoE，再决定是否加入 CASS + SG-CCFF。
-declare -a CURRENT_MAIN_EXPERIMENTS=(
-    "CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml"  # MoE 2x, no PG/CASS/SG
-    "CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml"  # PG-MoE 2x, no CASS/SG
-)
+# --main 与 --cas-main 共用 CAS_EXPERIMENT_CONFIGS 中 cas-main-* key，避免重复维护路径。
 
 # 构建全部配置列表与名称映射
 all_configs_paths=()
@@ -670,6 +663,7 @@ parse_arguments() {
     local has_m=false
     local has_k05=false
     local has_k07=false
+    local has_cas_cass_sg_ccff=false
     local filtered_args=()
     
     local idx=0
@@ -739,6 +733,9 @@ parse_arguments() {
             idx=$((idx + 1))
             continue
         fi
+        if [ "$arg" == "--cas-cass-sg-ccff" ] || [ "$arg" == "--cas_cass_sg_ccff" ]; then
+            has_cas_cass_sg_ccff=true
+        fi
         if [ "$arg" == "--dataset" ]; then
             local dataset_arg="${args[$((idx + 1))]}"
             if [ -z "$dataset_arg" ]; then
@@ -764,7 +761,12 @@ parse_arguments() {
     done
 
     if [ "$SCOPE_DAIRV2X" != true ] && [ "$SCOPE_UADETRAC" != true ]; then
-        SCOPE_DAIRV2X=true
+        if [ "$has_cas_cass_sg_ccff" = true ]; then
+            SCOPE_DAIRV2X=true
+            SCOPE_UADETRAC=true
+        else
+            SCOPE_DAIRV2X=true
+        fi
     fi
     if [ "$SCOPE_DAIRV2X" = true ]; then
         log_info "数据集协议: dairv2x"
@@ -846,6 +848,22 @@ parse_arguments() {
             [ "$already_added" = true ] || CONFIGS_TO_RUN+=("$candidate")
         done
     }
+
+    append_cas_key_group() {
+        local prefix="$1" key
+        for key in $(printf '%s\n' "${!CAS_EXPERIMENT_CONFIGS[@]}" | sort); do
+            [[ "$key" == "$prefix"* ]] || continue
+            append_cas_group "${CAS_EXPERIMENT_CONFIGS[$key]}"
+        done
+    }
+
+    append_cas_cass_sg_ccff_group() {
+        append_cas_group \
+            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-sg-ccff-2x-dairv2x]}" \
+            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-pg-moe-sg-ccff-2x-dairv2x]}" \
+            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-sg-ccff-2x-uadetrac]}" \
+            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-pg-moe-sg-ccff-2x-uadetrac]}"
+    }
     
     # 收集所有指定的实验类型（支持多个参数叠加）
     local has_rtdetrv2=false
@@ -879,6 +897,9 @@ parse_arguments() {
                 ;;
             --cas-main|--cas_main)
                 has_cas_main=true
+                ;;
+            --cas-cass-sg-ccff|--cas_cass_sg_ccff)
+                has_cas_cass_sg_ccff=true
                 ;;
             --cas-components|--cas_components)
                 has_cas_components=true
@@ -941,12 +962,13 @@ parse_arguments() {
     done
     
     # 如果指定了实验类型，只运行指定的类型（支持多个）
-    if [ "$has_main" = true ] || [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_fair_baselines" = true ] || [ "$has_dfine" = true ]; then
+    if [ "$has_main" = true ] || [ "$has_rtdetrv2" = true ] || [ "$has_cas_main" = true ] || [ "$has_cas_cass_sg_ccff" = true ] || [ "$has_cas_components" = true ] || [ "$has_cas_moe_capacity" = true ] || [ "$has_cas_all_train" = true ] || [ "$has_dqm_detr" = true ] || [ "$has_dqm_module_ablation" = true ] || [ "$has_dqm_degradation" = true ] || [ "$has_dqm_main" = true ] || [ "$has_fq_dqm_prob" = true ] || [ "$has_fq_dqm_fqm" = true ] || [ "$has_yolov5" = true ] || [ "$has_yolov8" = true ] || [ "$has_yolov12" = true ] || [ "$has_yolox" = true ] || [ "$has_fasterrcnn" = true ] || [ "$has_deim" = true ] || [ "$has_fair_baselines" = true ] || [ "$has_dfine" = true ]; then
         # 显示将要运行的类型
         local selected_types=()
         [ "$has_main" = true ] && selected_types+=("CurrentMain")
         [ "$has_rtdetrv2" = true ] && selected_types+=("RT-DETRv2+train_adapter")
         [ "$has_cas_main" = true ] && selected_types+=("CaS_Main")
+        [ "$has_cas_cass_sg_ccff" = true ] && selected_types+=("CaS_CASS+SG-CCFF")
         [ "$has_cas_components" = true ] && selected_types+=("CaS_ComponentAblation")
         [ "$has_cas_moe_capacity" = true ] && selected_types+=("CaS_MoECapacity")
         [ "$has_cas_all_train" = true ] && selected_types+=("CaS_AllTrain")
@@ -973,7 +995,7 @@ parse_arguments() {
         
         # 根据指定的类型添加配置
         if [ "$has_main" = true ]; then
-            append_cas_group "${CURRENT_MAIN_EXPERIMENTS[@]}"
+            append_cas_key_group cas-main-
         fi
 
         if [ "$has_rtdetrv2" = true ]; then
@@ -991,8 +1013,9 @@ parse_arguments() {
             has_cas_moe_capacity=true
         fi
 
-        [ "$has_cas_main" = true ] && append_cas_group "${CAS_MAIN_EXPERIMENTS[@]}"
-        [ "$has_cas_components" = true ] && append_cas_group "${CAS_COMPONENT_ABLATION_EXPERIMENTS[@]}"
+        [ "$has_cas_main" = true ] && append_cas_key_group cas-main-
+        [ "$has_cas_cass_sg_ccff" = true ] && append_cas_cass_sg_ccff_group
+        [ "$has_cas_components" = true ] && append_cas_key_group cas-component-
         [ "$has_cas_moe_capacity" = true ] && append_cas_group "${CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS[@]}"
         if [ "$has_dqm_detr" = true ]; then
             for key in $(printf '%s\n' "${!DQM_DETR_CONFIGS[@]}" | sort); do
@@ -1224,6 +1247,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --rtdetrv2                      # 官方 rtdetrv2_pytorch + train_adapter（默认 --cas-eval）"
         echo "  ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac  # DEIM baseline 与 CaS 主实验"
         echo "  ./run_batch_experiments.sh --cas-main --dataset dairv2x,uadetrac  # CaS 主实验"
+        echo "  ./run_batch_experiments.sh --cas-cass-sg-ccff                  # 单独运行 CASS + SG-CCFF（4 配置）"
         echo "  ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only"
         echo "  ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # 容量消融（当前暂时停用）"
         echo "  ./run_batch_experiments.sh --cas-all-train --dairv2x       # 全部 DAIR CaS 训练组"

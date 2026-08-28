@@ -1,0 +1,11 @@
+__include__: [
+  './cas_detr_pg_moe_cap2x_hgnetv2_s_uadetrac.yml'
+]
+
+# Full CASS -> SG-CCFF -> PG-MoE chain on UA-DETRAC.
+output_dir: ./outputs/uadetrac/main/cas_detr_cass_pg_moe_sg_ccff_cap2x_hgnetv2_s
+
+HybridEncoder:
+  enable_cas_predictor: True
+  use_cass: True
+  enable_sg_ccff: True
