@@ -5,7 +5,7 @@ __include__: [
 # No-MoE control with the CASS-guided SG-CCFF neck: isolates the neck without
 # the decoder MoE. Dense FFN is restored to the pretrained width (1024) so the
 # `tuning` checkpoint still loads.
-output_dir: ./outputs/dairv2x/main/cas_detr_cass_sg_ccff_cap2x_hgnetv2_s
+output_dir: ./outputs/dairv2x/main/cas_detr_cass_sg_ccff_hgnetv2_s
 
 HybridEncoder:
   enable_sg_ccff: True

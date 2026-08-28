@@ -3,7 +3,7 @@ __include__: [
 ]
 
 # CASS + SG-CCFF control on UA-DETRAC, without decoder MoE.
-output_dir: ./outputs/uadetrac/main/cas_detr_cass_sg_ccff_cap2x_hgnetv2_s
+output_dir: ./outputs/uadetrac/main/cas_detr_cass_sg_ccff_hgnetv2_s
 
 HybridEncoder:
   enable_sg_ccff: True

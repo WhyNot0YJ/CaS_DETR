@@ -31,8 +31,8 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   RTDETR_TUNING_CKPT=/path/to.pth ./run_batch_experiments.sh --yes --rtdetrv2
 #   ./run_batch_experiments.sh --dairv2x --rtdetrv2          # 仅 DAIR-V2X 的 RT-DETR v2
 #   ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac
-#                                                               # DEIM baseline vs. stage-1 MoE/PG-MoE
-#   ./run_batch_experiments.sh --cas-cass-sg-ccff               # 单独运行 CASS + SG-CCFF（4 配置）
+#                                                               # DEIM baseline vs. CaS main experiments
+#   ./run_batch_experiments.sh --cas-cass-sg-ccff               # 单独运行 CASS + SG-CCFF（2 配置）
 #   ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only
 #   ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # 容量消融（当前暂时停用）
 #   ./run_batch_experiments.sh --cas-all-train --dairv2x       # 所有 DAIR CaS 训练组（不含 native DEIM）
@@ -51,7 +51,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）
 #   ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数
 #   ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）
-#   ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X 第一阶段：MoE 2x vs PG-MoE 2x
+#   ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X：MoE 2x 与 CASS+SG-CCFF
 #   ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2，等价 --rtdetrv2
 #   ./run_batch_experiments.sh --test --rtdetrv2               # 测试模式只跑官方 RT-DETRv2（2 epoch + cas-eval）
 #   ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验（2 epoch smoke test）
@@ -307,8 +307,7 @@ declare -A RTDETRV2_ADAPTER_CONFIGS=(
 # mirrored as an all-off CaS config; run it with --deim under the same protocol.
 # Main and ablation paths are registered once in the key map below.
 
-# Capacity scan is kept for later; do not include it in the current queue until
-# the PG-MoE/SG-CCFF capacity policy is finalized.
+# Capacity scan is kept for later; do not include it in the current queue.
 declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=()
 
 # MoE expert initialization is built into the tuning load: width-matched
@@ -318,13 +317,10 @@ declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=()
 
 declare -A CAS_EXPERIMENT_CONFIGS=(
     ["cas-main-moe-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml"
-    ["cas-main-pg-moe-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_pg_moe_cap2x_hgnetv2_s_dairv2x.yml"
-    ["cas-main-cass-sg-ccff-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_sg_ccff_cap2x_hgnetv2_s_dairv2x.yml"
-    ["cas-main-cass-pg-moe-sg-ccff-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_pg_moe_sg_ccff_cap2x_hgnetv2_s_dairv2x.yml"
-    ["cas-main-cass-sg-ccff-2x-uadetrac"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_sg_ccff_cap2x_hgnetv2_s_uadetrac.yml"
-    ["cas-main-cass-pg-moe-sg-ccff-2x-uadetrac"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_pg_moe_sg_ccff_cap2x_hgnetv2_s_uadetrac.yml"
+    ["cas-main-cass-sg-ccff-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_sg_ccff_hgnetv2_s_dairv2x.yml"
+    ["cas-main-cass-sg-ccff-uadetrac"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_sg_ccff_hgnetv2_s_uadetrac.yml"
     ["cas-component-token-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
-    # Capacity entries are intentionally disabled pending the PG-MoE decision:
+    # Capacity entries are intentionally disabled pending the capacity policy:
     # ["cas-moe-cap1x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_pg_moe_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
     # ["cas-moe-cap2x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_pg_moe_cap2x_dynamic03_hgnetv2_s_dairv2x.yml"
     # ["cas-moe-cap4x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_pg_moe_cap4x_dynamic03_hgnetv2_s_dairv2x.yml"
@@ -333,7 +329,7 @@ declare -A CAS_EXPERIMENT_CONFIGS=(
 cas_result_group() {
     case "$1" in
         CaS-DETR/configs/dataset/main/*) echo "main" ;;
-        *cas_detr_*cap2x_hgnetv2_s_dairv2x.yml|*cas_detr_*cap2x_hgnetv2_s_uadetrac.yml) echo "main" ;;
+        *cas_detr_cass_sg_ccff_hgnetv2_s_dairv2x.yml|*cas_detr_cass_sg_ccff_hgnetv2_s_uadetrac.yml|*cas_detr_*cap2x_hgnetv2_s_dairv2x.yml|*cas_detr_*cap2x_hgnetv2_s_uadetrac.yml) echo "main" ;;
         *cas_detr_token_only_*) echo "component_ablation" ;;
         *cas_detr_pg_moe_cap1x_*|*cas_detr_pg_moe_cap2x_*|*cas_detr_pg_moe_cap4x_*|*cas_detr_moe4_cap05x_*|*cas_detr_moe4_cap1x_*|*cas_detr_moe4_cap2x_*|*cas_detr_moe4_cap4x_*) echo "moe_capacity" ;;
         *) echo "" ;;
@@ -859,10 +855,8 @@ parse_arguments() {
 
     append_cas_cass_sg_ccff_group() {
         append_cas_group \
-            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-sg-ccff-2x-dairv2x]}" \
-            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-pg-moe-sg-ccff-2x-dairv2x]}" \
-            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-sg-ccff-2x-uadetrac]}" \
-            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-pg-moe-sg-ccff-2x-uadetrac]}"
+            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-sg-ccff-dairv2x]}" \
+            "${CAS_EXPERIMENT_CONFIGS[cas-main-cass-sg-ccff-uadetrac]}"
     }
     
     # 收集所有指定的实验类型（支持多个参数叠加）
@@ -1247,7 +1241,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --rtdetrv2                      # 官方 rtdetrv2_pytorch + train_adapter（默认 --cas-eval）"
         echo "  ./run_batch_experiments.sh --deim --cas-main --dataset dairv2x,uadetrac  # DEIM baseline 与 CaS 主实验"
         echo "  ./run_batch_experiments.sh --cas-main --dataset dairv2x,uadetrac  # CaS 主实验"
-        echo "  ./run_batch_experiments.sh --cas-cass-sg-ccff                  # 单独运行 CASS + SG-CCFF（4 配置）"
+        echo "  ./run_batch_experiments.sh --cas-cass-sg-ccff                  # 单独运行 CASS + SG-CCFF（2 配置）"
         echo "  ./run_batch_experiments.sh --cas-components --dairv2x      # CaS 组件消融：Token-only、hybrid-decoder-only"
         echo "  ./run_batch_experiments.sh --cas-moe-capacity --dairv2x    # 容量消融（当前暂时停用）"
         echo "  ./run_batch_experiments.sh --cas-all-train --dairv2x       # 全部 DAIR CaS 训练组"
@@ -1267,7 +1261,7 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）"
         echo "  ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数"
         echo "  ./run_batch_experiments.sh --dfine                          # 只运行 D-FINE-S（DAIR + UA-DETRAC）"
-        echo "  ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X 第一阶段：MoE 2x vs PG-MoE 2x"
+        echo "  ./run_batch_experiments.sh --main --dairv2x                # DAIR-V2X：MoE 2x 与 CASS+SG-CCFF"
         echo "  ./run_batch_experiments.sh --test --rt-detr                # 测试模式只跑 RT-DETR v2"
         echo "  ./run_batch_experiments.sh --test --cas-main --dairv2x     # 测试模式只运行 CaS 主实验"
         echo "  ./run_batch_experiments.sh --test --dqm_detr               # 测试模式：DQM 全部消融+主实验"
