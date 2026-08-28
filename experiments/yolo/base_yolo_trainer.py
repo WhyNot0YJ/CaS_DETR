@@ -55,8 +55,10 @@ from common.det_eval_metrics import (
     extract_per_category_ap_from_coco_eval,
     format_area_bucket_counts,
     run_coco_bbox_eval,
+    small_object_diagnostic_area_ap,
 )
 from common.det_eval_metrics import write_eval_csv
+from common.small_object_diagnostics import small_object_diagnostic_spec
 
 # Ultralytics ``cfg/default.yaml``：未指定 batch 时为 16
 DEFAULT_TRAIN_BATCH = 16
@@ -531,6 +533,11 @@ class BaseYOLOTrainer(ABC):
         val_ann = self._resolve_coco_ann_file(data_cfg, root, 'val')
         primary_dir_names = {path.name for path in val_img_dirs}
         primary_split = 'eval' if 'eval' in primary_dir_names else ('test' if 'test' in primary_dir_names else 'val')
+        if primary_split != 'val' and not (
+            (lm_val.is_dir() and any(lm_val.glob('*.json'))) or (val_ann is not None and val_ann.is_file())
+        ):
+            lm_val = self._resolve_labels_meta_dir(data_cfg, root, primary_split)
+            val_ann = self._resolve_coco_ann_file(data_cfg, root, primary_split)
         if (lm_val.is_dir() and any(lm_val.glob('*.json'))) or (
             val_ann is not None and val_ann.is_file()
         ):
@@ -732,6 +739,7 @@ class BaseYOLOTrainer(ABC):
         if model_name.endswith('.pt'):
             model_name = model_name[:-3]
         dataset_name = self._canonical_dataset_name()
+        _, small_diagnostic_keys = small_object_diagnostic_spec(dataset_name)
 
         class_names = self.class_names if self.class_names else [f'cls_{i}' for i in range(nc)]
 
@@ -1023,6 +1031,8 @@ class BaseYOLOTrainer(ABC):
                         metrics[f'AP5095_{suffix}'] = 0.0
                         metrics[f'AP_small_50_{suffix}'] = 0.0
                         metrics[f'AP_small_5095_{suffix}'] = 0.0
+                    for key in small_diagnostic_keys:
+                        metrics[key] = 0.0
                 else:
                     metrics['mAP_50'] = coco_ap_at_iou50_all(coco_eval)
                     metrics['mAP_5095'] = (
@@ -1064,6 +1074,12 @@ class BaseYOLOTrainer(ABC):
                         metrics[f'AP5095_{suffix}'] = per_cat_5095.get(suffix, 0.0)
                         metrics[f'AP_small_50_{suffix}'] = per_cat_small_50.get(suffix, 0.0)
                         metrics[f'AP_small_5095_{suffix}'] = per_cat_small_5095.get(suffix, 0.0)
+                    # 论文诊断：复用同一 COCOeval，排除 small GT < 20 的类别
+                    metrics.update(
+                        small_object_diagnostic_area_ap(
+                            coco_eval, categories_coco, dataset_name, area_index=1
+                        )
+                    )
 
                 weather_log_parts_50 = []
                 weather_log_parts_5095 = []
@@ -1123,6 +1139,12 @@ class BaseYOLOTrainer(ABC):
                     f"@0.5:0.95: {metrics['AP_small_5095']:.4f} / "
                     f"{metrics['AP_medium_5095']:.4f} / {metrics['AP_large_5095']:.4f}"
                 )
+                if len(small_diagnostic_keys) == 2 and small_diagnostic_keys[0] in metrics:
+                    self.logger.info(
+                        f"📐 [{eval_split}] AP_small (exclude <20 small GT)  "
+                        f"@0.5: {metrics[small_diagnostic_keys[0]]:.4f}  |  "
+                        f"@0.5:0.95: {metrics[small_diagnostic_keys[1]]:.4f}"
+                    )
                 cls_50_str = ' | '.join(
                     f'{eval_class_names[i]}={per_cls_50[i]:.4f}' for i in range(eval_nc)
                 )
@@ -1157,6 +1179,9 @@ class BaseYOLOTrainer(ABC):
                         if k in BENCHMARK_EVAL_METRIC_KEYS or k in END_TO_END_EVAL_METRIC_KEYS
                     },
                     metadata=csv_metadata,
+                    diagnostic_metric_keys=[
+                        key for key in small_diagnostic_keys if key in metrics
+                    ],
                 )
                 last_metrics = metrics
 

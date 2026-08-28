@@ -14,7 +14,7 @@ from common.det_eval_metrics import (  # noqa: E402
     extract_per_category_ap_from_coco_eval,
     write_eval_csv,
 )
-from common.eval_deim_dfine import small_object_diagnostic_spec  # noqa: E402
+from common.small_object_diagnostics import small_object_diagnostic_spec  # noqa: E402
 
 
 def test_per_class_small_ap_and_csv_columns():

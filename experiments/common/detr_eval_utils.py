@@ -108,6 +108,7 @@ def write_detr_eval_csv(
     *,
     aggregate_at_parent: bool = True,
     metadata: Optional[Dict[str, object]] = None,
+    diagnostic_metric_keys: Optional[List[str]] = None,
 ) -> Path:
     """写入汇总 eval_metrics.csv（含 benchmark 列）。返回 CSV 路径。"""
     from common.result_paths import result_csv
@@ -123,6 +124,7 @@ def write_detr_eval_csv(
         append=summary_csv.exists(),
         benchmark=bench_dict,
         metadata=metadata,
+        diagnostic_metric_keys=diagnostic_metric_keys,
     )
     return summary_csv
 

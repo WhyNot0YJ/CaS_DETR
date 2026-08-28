@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from common.result_paths import append_csv_rows, upsert_csv_rows
 from common.model_benchmark import BENCHMARK_EVAL_METRIC_KEYS, END_TO_END_EVAL_METRIC_KEYS
+from common.small_object_diagnostics import small_object_diagnostic_spec
 
 import numpy as np
 
@@ -113,6 +114,28 @@ def coco_area_ap_excluding_categories(
         float(np.mean(p50)) if p50.size > 0 else 0.0,
         float(np.mean(p5095)) if p5095.size > 0 else 0.0,
     )
+
+
+def small_object_diagnostic_area_ap(
+    coco_eval: Any,
+    categories: List[Dict[str, Any]],
+    dataset_name: str,
+    *,
+    area_index: int = 1,
+) -> Dict[str, float]:
+    """按协议返回排除低样本 small-GT 类别后的 small-object 诊断 AP。
+
+    规则见 ``common.small_object_diagnostics``：DAIR-V2X 排除 bus/truck，
+    UA-DETRAC 排除 bus；UA 的 others 无 small GT，由 COCOeval 自然忽略。
+    返回 ``{诊断列名: 数值}``；协议无排除规则或 ``coco_eval`` 缺失时返回 ``{}``。
+    """
+    excluded, diagnostic_keys = small_object_diagnostic_spec(dataset_name)
+    if not excluded or len(diagnostic_keys) != 2 or coco_eval is None:
+        return {}
+    ap50, ap5095 = coco_area_ap_excluding_categories(
+        coco_eval, categories, excluded, area_index=area_index
+    )
+    return {diagnostic_keys[0]: ap50, diagnostic_keys[1]: ap5095}
 
 
 def extract_per_category_ap_from_coco_eval(

@@ -35,17 +35,18 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 from common.det_eval_metrics import (
     coco_ap_at_iou50_all,
-    coco_area_ap_excluding_categories,
     coco_area_ap_at_iou50,
     canonical_category_metric_name,
     compute_weather_subset_metrics,
     extract_per_category_ap_from_coco_eval,
     run_coco_bbox_eval,
+    small_object_diagnostic_area_ap,
     write_eval_csv,
 )
 from common.detr_eval_utils import log_detr_eval_summary, run_detr_benchmark
 from common.result_paths import result_csv, run_metadata
 from common.dataset_protocol import apply_detr_protocol_overrides
+from common.small_object_diagnostics import small_object_diagnostic_spec
 from common.train_notifications import notify_training_entry
 
 logging.basicConfig(
@@ -557,38 +558,8 @@ def _build_coco_gt_dict(ann_file: str) -> Dict[str, Any]:
     return gt
 
 
-def _is_dair_dataset(dataset_name: str) -> bool:
-    low = dataset_name.lower()
-    return "dair" in low or "dairv2x" in low
-
-
-def _is_uadetrac_dataset(dataset_name: str) -> bool:
-    low = dataset_name.lower()
-    return "uadetrac" in low or "ua-detrac" in low or "ua_detrac" in low
-
-
-# Listed categories have fewer than 20 small ground-truth instances in the
-# respective test set. The official COCO AP_small remains unchanged.
-DAIR_SMALL_EXCLUDED_CATEGORIES = ("bus", "truck")
-DAIR_SMALL_DIAGNOSTIC_KEYS = (
-    "AP_small_50_excl_bus_truck",
-    "AP_small_5095_excl_bus_truck",
-)
-UADETRAC_SMALL_EXCLUDED_CATEGORIES = ("bus",)
-UADETRAC_SMALL_DIAGNOSTIC_KEYS = (
-    "AP_small_50_excl_bus",
-    "AP_small_5095_excl_bus",
-)
-
-
-def small_object_diagnostic_spec(
-    dataset_name: str,
-) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
-    if _is_dair_dataset(dataset_name):
-        return DAIR_SMALL_EXCLUDED_CATEGORIES, DAIR_SMALL_DIAGNOSTIC_KEYS
-    if _is_uadetrac_dataset(dataset_name):
-        return UADETRAC_SMALL_EXCLUDED_CATEGORIES, UADETRAC_SMALL_DIAGNOSTIC_KEYS
-    return (), ()
+# 协议 → 排除类别/诊断列名 的规则集中在 common.small_object_diagnostics，
+# 供 DEIM 与 YOLO 最终评测共用；此处仅 re-export 以保持既有导入可用。
 
 
 def compute_cas_metrics(
@@ -632,16 +603,9 @@ def compute_cas_metrics(
 
     per50, per5095 = extract_per_category_ap_from_coco_eval(ce, categories)
     small50, small5095 = extract_per_category_ap_from_coco_eval(ce, categories, area_index=1)
-    small_excluded_categories, small_diagnostic_keys = small_object_diagnostic_spec(dataset_name)
-    if small_excluded_categories:
-        small50_excl, small5095_excl = coco_area_ap_excluding_categories(
-            ce,
-            categories,
-            small_excluded_categories,
-            area_index=1,
-        )
-        metrics[small_diagnostic_keys[0]] = small50_excl
-        metrics[small_diagnostic_keys[1]] = small5095_excl
+    metrics.update(
+        small_object_diagnostic_area_ap(ce, categories, dataset_name, area_index=1)
+    )
     for name, v in per50.items():
         metrics[f"AP50_{canonical_category_metric_name(name)}"] = v
     for name, v in per5095.items():

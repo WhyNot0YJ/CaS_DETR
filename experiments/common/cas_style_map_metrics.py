@@ -17,7 +17,9 @@ from common.det_eval_metrics import (
     coco_area_ap_at_iou50,
     canonical_category_metric_name,
     extract_per_category_ap_from_coco_eval,
+    small_object_diagnostic_area_ap,
 )
+from common.small_object_diagnostics import small_object_diagnostic_spec
 
 
 def _run_coco_eval(
@@ -86,10 +88,15 @@ def compute_cas_style_map_metrics(
     img_h: int = 640,
     img_w: int = 640,
     print_per_category: bool = False,
+    dataset_name: str = "",
 ) -> Dict[str, Any]:
     """
     计算共享的 COCO-style mAP 指标（含全局与 COCO 面积档 small/medium/large 的 @0.5 与 @0.5:0.95）。
+
+    ``dataset_name`` 命中正式协议（DAIR-V2X / UA-DETRAC）时，额外并入
+    排除低样本 small-GT 类别的诊断列（见 ``common.small_object_diagnostics``）。
     """
+    zero_diag = {k: 0.0 for k in small_object_diagnostic_spec(dataset_name)[1]}
     if len(predictions) == 0 or len(targets) == 0:
         return {
             "mAP_0.5": 0.0,
@@ -108,6 +115,7 @@ def compute_cas_style_map_metrics(
             "AR_medium": 0.0,
             "AR_large": 0.0,
             "AR_100": 0.0,
+            **zero_diag,
         }
 
     per_cat_50: Dict[str, float] = {}
@@ -153,6 +161,9 @@ def compute_cas_style_map_metrics(
             "AR_large": float(_s[10]) if _n > 10 else 0.0,
             "AR_100": float(_s[7]) if _n > 7 else 0.0,
         }
+        result.update(
+            small_object_diagnostic_area_ap(coco_eval, categories, dataset_name, area_index=1)
+        )
 
         for cat_name in per_cat_5095.keys():
             suffix = canonical_category_metric_name(cat_name)
@@ -182,4 +193,5 @@ def compute_cas_style_map_metrics(
             "AR_medium": 0.0,
             "AR_large": 0.0,
             "AR_100": 0.0,
+            **zero_diag,
         }

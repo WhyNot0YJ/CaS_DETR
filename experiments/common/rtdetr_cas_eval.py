@@ -16,12 +16,14 @@ import torch
 import torch.nn as nn
 
 from common.cas_style_map_metrics import compute_cas_style_map_metrics
+from common.det_eval_metrics import dataset_display_name
 from common.detr_eval_utils import (
     log_detr_eval_summary,
     run_detr_benchmark,
     write_detr_eval_csv,
 )
 from common.result_paths import run_metadata
+from common.small_object_diagnostics import small_object_diagnostic_spec
 
 logger = logging.getLogger(__name__)
 
@@ -366,6 +368,9 @@ def run_rtdetr_cas_style_eval_after_fit(
 
     yaml_cfg = cfg.yaml_cfg
     cfg_stub = config_stub_for_csv(yaml_cfg, base_config_path)
+    # 与 write_detr_eval_csv 的 dataset 列同源，保证诊断规则与 CSV 协议一致
+    ds_name = dataset_display_name(cfg_stub)
+    small_diag_keys = list(small_object_diagnostic_spec(ds_name)[1])
 
     bench_dict = None
     try:
@@ -405,6 +410,7 @@ def run_rtdetr_cas_style_eval_after_fit(
         img_h=ih,
         img_w=iw,
         print_per_category=True,
+        dataset_name=ds_name,
     )
 
     log_detr_eval_summary(logger, eval_split, metrics, bench_dict)
@@ -417,6 +423,7 @@ def run_rtdetr_cas_style_eval_after_fit(
         class_names,
         bench_dict,
         aggregate_at_parent=False,
+        diagnostic_metric_keys=small_diag_keys,
         metadata=run_metadata(
             run_id=out.name,
             framework="rtdetr",
@@ -452,6 +459,7 @@ def run_rtdetr_cas_style_eval_after_fit(
         img_h=ih_t,
         img_w=iw_t,
         print_per_category=True,
+        dataset_name=ds_name,
     )
     log_detr_eval_summary(logger, "test", metrics_t, bench_dict)
     csv_path_t = write_detr_eval_csv(
@@ -463,6 +471,7 @@ def run_rtdetr_cas_style_eval_after_fit(
         class_names,
         bench_dict,
         aggregate_at_parent=False,
+        diagnostic_metric_keys=small_diag_keys,
         metadata=run_metadata(
             run_id=out.name,
             framework="rtdetr",
