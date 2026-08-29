@@ -318,6 +318,9 @@ declare -a CAS_MOE_CAPACITY_ABLATION_EXPERIMENTS=()
 declare -A CAS_EXPERIMENT_CONFIGS=(
     ["cas-main-moe-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_dairv2x.yml"
     ["cas-main-cass-moe-sg-ccff-2x-dairv2x"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_moe_sg_ccff_cap2x_hgnetv2_s_dairv2x.yml"
+    ["cas-main-cass-sg-ccff-uadetrac"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_sg_ccff_hgnetv2_s_uadetrac.yml"
+    ["cas-main-moe-2x-uadetrac"]="CaS-DETR/configs/deim_dfine/cas_detr_moe_cap2x_hgnetv2_s_uadetrac.yml"
+    ["cas-main-cass-moe-sg-ccff-2x-uadetrac"]="CaS-DETR/configs/deim_dfine/cas_detr_cass_moe_sg_ccff_cap2x_hgnetv2_s_uadetrac.yml"
     ["cas-component-token-only-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_token_only_dynamic03_hgnetv2_s_dairv2x.yml"
     # Capacity entries are intentionally disabled pending the capacity policy:
     # ["cas-moe-cap1x-dairv2x"]="CaS-DETR/configs/dataset/ablation/cas_detr_pg_moe_cap1x_dynamic03_hgnetv2_s_dairv2x.yml"
