@@ -268,7 +268,7 @@ class YOLOXHead(nn.Module):
         cls_preds = outputs[:, :, 5:]  # [batch, n_anchors_all, n_cls]
 
         # calculate targets
-        nlabel = (labels.sum(dim=2) > 0).sum(dim=1)  # number of objects
+        nlabel = ((labels[:, :, :4].sum(dim=2) > 0) & (labels[:, :, 0] >= 0)).sum(dim=1)
 
         total_num_anchors = outputs.shape[1]
         x_shifts = torch.cat(x_shifts, 1)  # [1, n_anchors_all]
@@ -287,6 +287,11 @@ class YOLOXHead(nn.Module):
         num_gts = 0.0
 
         for batch_idx in range(outputs.shape[0]):
+            valid_labels = labels[batch_idx][labels[batch_idx, :, 1:5].sum(dim=1) > 0]
+            positive_labels = valid_labels[valid_labels[:, 0] >= 0]
+            ignore_labels = labels[batch_idx][
+                (labels[batch_idx, :, 0] < 0) & (labels[batch_idx, :, 1:5].sum(dim=1) > 0)
+            ]
             num_gt = int(nlabel[batch_idx])
             num_gts += num_gt
             if num_gt == 0:
@@ -296,8 +301,8 @@ class YOLOXHead(nn.Module):
                 obj_target = outputs.new_zeros((total_num_anchors, 1))
                 fg_mask = outputs.new_zeros(total_num_anchors).bool()
             else:
-                gt_bboxes_per_image = labels[batch_idx, :num_gt, 1:5]
-                gt_classes = labels[batch_idx, :num_gt, 0]
+                gt_bboxes_per_image = positive_labels[:, 1:5]
+                gt_classes = positive_labels[:, 0]
                 bboxes_preds_per_image = bbox_preds[batch_idx]
 
                 try:
@@ -371,6 +376,25 @@ class YOLOXHead(nn.Module):
             reg_targets.append(reg_target)
             obj_targets.append(obj_target.to(dtype))
             fg_masks.append(fg_mask)
+            if len(ignore_labels):
+                anchor_xyxy = torch.stack((
+                    (x_shifts[0] + 0.5) * expanded_strides[0],
+                    (y_shifts[0] + 0.5) * expanded_strides[0],
+                    (x_shifts[0] + 0.5) * expanded_strides[0],
+                    (y_shifts[0] + 0.5) * expanded_strides[0],
+                ), 1)
+                anchor_xyxy[:, :2] -= expanded_strides[0].unsqueeze(1) / 2
+                anchor_xyxy[:, 2:] += expanded_strides[0].unsqueeze(1) / 2
+                ignore_xyxy = torch.stack((
+                    ignore_labels[:, 1] - ignore_labels[:, 3] / 2,
+                    ignore_labels[:, 2] - ignore_labels[:, 4] / 2,
+                    ignore_labels[:, 1] + ignore_labels[:, 3] / 2,
+                    ignore_labels[:, 2] + ignore_labels[:, 4] / 2,
+                ), 1)
+                lt = torch.maximum(anchor_xyxy[:, None, :2], ignore_xyxy[None, :, :2])
+                rb = torch.minimum(anchor_xyxy[:, None, 2:], ignore_xyxy[None, :, 2:])
+                ioa = (rb - lt).clamp(min=0).prod(-1) / expanded_strides[0].square().unsqueeze(1)
+                obj_targets[-1][ioa.amax(1) >= 0.5] = -1
             if self.use_l1:
                 l1_targets.append(l1_target)
 
@@ -385,9 +409,8 @@ class YOLOXHead(nn.Module):
         loss_iou = (
             self.iou_loss(bbox_preds.view(-1, 4)[fg_masks], reg_targets)
         ).sum() / num_fg
-        loss_obj = (
-            self.bcewithlog_loss(obj_preds.view(-1, 1), obj_targets)
-        ).sum() / num_fg
+        obj_loss = self.bcewithlog_loss(obj_preds.view(-1, 1), obj_targets.clamp_min(0))
+        loss_obj = obj_loss[obj_targets.view(-1, 1) >= 0].sum() / num_fg
         loss_cls = (
             self.bcewithlog_loss(
                 cls_preds.view(-1, self.num_classes)[fg_masks], cls_targets

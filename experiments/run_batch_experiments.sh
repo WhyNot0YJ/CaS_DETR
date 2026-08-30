@@ -1407,6 +1407,10 @@ run_single_experiment() {
             --experiment-name "${exp_name}_${rtdetr_adapter_dataset}"
         )
         adapter_cmd+=("--${rtdetr_adapter_dataset}")
+        if [ -f "$rtdetr_output_rel/last.pth" ]; then
+            adapter_cmd+=(-r "$rtdetr_output_rel/last.pth")
+            log_info "检测到 checkpoint，恢复训练: $rtdetr_output_rel/last.pth"
+        fi
         if [ "${RTDETRV2_CAS_EVAL:-1}" != "0" ]; then
             adapter_cmd+=(--cas-eval)
         fi

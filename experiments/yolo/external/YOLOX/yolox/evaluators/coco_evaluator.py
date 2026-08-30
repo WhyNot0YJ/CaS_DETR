@@ -18,6 +18,8 @@ import numpy as np
 
 import torch
 
+from common.uadetrac_ignore import filter_coco_predictions_by_ignore
+
 from yolox.data.datasets import COCO_CLASSES
 from yolox.utils import (
     gather,
@@ -280,9 +282,12 @@ class COCOEvaluator:
 
         info = time_info + "\n"
 
+        cocoGt = self.dataloader.dataset.coco
+        if any(image.get("ignore_regions") for image in cocoGt.dataset.get("images", [])):
+            data_dict = filter_coco_predictions_by_ignore(cocoGt.dataset, data_dict)
+
         # Evaluate the Dt (detection) json comparing with the ground truth
         if len(data_dict) > 0:
-            cocoGt = self.dataloader.dataset.coco
             # TODO: since pycocotools can't process dict in py36, write data to json file.
             if self.testdev:
                 json.dump(data_dict, open("./yolox_testdev_2017.json", "w"))

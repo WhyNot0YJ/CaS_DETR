@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from common.result_paths import append_csv_rows, upsert_csv_rows
 from common.model_benchmark import BENCHMARK_EVAL_METRIC_KEYS, END_TO_END_EVAL_METRIC_KEYS
 from common.small_object_diagnostics import small_object_diagnostic_spec
+from common.uadetrac_ignore import filter_coco_predictions_by_ignore
 
 import numpy as np
 
@@ -199,6 +200,7 @@ def run_coco_bbox_eval(
     try:
         # pycocotools COCO.loadRes 会执行 res.dataset['info'] = copy.deepcopy(self.dataset['info'])，缺省 KeyError
         coco_in = dict(coco_gt)
+        predictions = filter_coco_predictions_by_ignore(coco_gt, predictions)
         coco_in.setdefault(
             "info",
             {"description": "CaS_DETR_eval", "version": "1.0", "year": 2024},

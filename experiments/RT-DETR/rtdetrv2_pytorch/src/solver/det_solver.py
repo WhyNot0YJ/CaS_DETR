@@ -13,6 +13,15 @@ from ._solver import BaseSolver
 from .det_engine import train_one_epoch, evaluate
 
 
+def _should_run_epoch(epoch, total_epochs, frequency, extra_epochs=(), from_epoch=None):
+    return (
+        epoch == total_epochs - 1
+        or (from_epoch is not None and epoch >= from_epoch)
+        or epoch in extra_epochs
+        or (epoch + 1) % max(1, frequency) == 0
+    )
+
+
 class DetSolver(BaseSolver):
     
     def fit(self, ):
@@ -56,22 +65,26 @@ class DetSolver(BaseSolver):
             self.last_epoch += 1
 
             if self.output_dir:
-                checkpoint_paths = [self.output_dir / 'last.pth']
-                # extra checkpoint before LR drop and every 100 epochs
-                if (epoch + 1) % args.checkpoint_freq == 0:
-                    checkpoint_paths.append(self.output_dir / f'checkpoint{epoch:04}.pth')
-                for checkpoint_path in checkpoint_paths:
-                    dist_utils.save_on_master(self.state_dict(), checkpoint_path)
+                dist_utils.save_on_master(self.state_dict(), self.output_dir / 'last.pth')
 
-            module = self.ema.module if self.ema else self.model
-            test_stats, coco_evaluator = evaluate(
-                module, 
-                self.criterion, 
-                self.postprocessor, 
-                self.val_dataloader, 
-                self.evaluator, 
-                self.device
+            should_evaluate = _should_run_epoch(
+                epoch,
+                args.epoches,
+                getattr(args, 'eval_freq', 1),
+                getattr(args, 'eval_at_epochs', ()),
+                getattr(args, 'eval_from_epoch', None),
             )
+            test_stats, coco_evaluator = {}, None
+            if should_evaluate:
+                module = self.ema.module if self.ema else self.model
+                test_stats, coco_evaluator = evaluate(
+                    module,
+                    self.criterion,
+                    self.postprocessor,
+                    self.val_dataloader,
+                    self.evaluator,
+                    self.device
+                )
 
             # TODO 
             for k in test_stats:

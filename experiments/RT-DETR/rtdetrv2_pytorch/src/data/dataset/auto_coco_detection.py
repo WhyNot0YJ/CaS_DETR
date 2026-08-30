@@ -20,6 +20,7 @@ class AutoCocoDetection(CocoDetection):
         transforms,
         return_masks=False,
         remap_mscoco_category=False,
+        use_ignore_regions=False,
         img_folder=None,
         ann_file=None,
     ):
@@ -47,6 +48,7 @@ class AutoCocoDetection(CocoDetection):
             transforms=transforms,
             return_masks=return_masks,
             remap_mscoco_category=remap_mscoco_category,
+            use_ignore_regions=use_ignore_regions,
         )
         self.data_root = str(root)
         self.split = split

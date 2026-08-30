@@ -127,6 +127,7 @@ def main():
     else:
         profile = find_dataset_profile_by_data_yaml(datasets, config.get("data", {}).get("data_yaml", ""))
         if profile:
+            config = apply_dataset_profile(config, profile)
             profile_classes = profile.get("class_names", [])
             if isinstance(profile_classes, list) and profile_classes:
                 selected_class_names = [str(name) for name in profile_classes]

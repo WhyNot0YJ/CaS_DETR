@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.distributed
 import torch.nn.functional as F 
 import torchvision
+from common.uadetrac_ignore import apply_query_keep_mask, unmatched_query_keep_mask
 
 from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou
 from ...misc.dist_utils import get_world_size, is_dist_available_and_initialized
@@ -64,7 +65,11 @@ class RTDETRCriterion(nn.Module):
                                     dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
 
-        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
+        loss_ce = F.cross_entropy(
+            src_logits.transpose(1, 2), target_classes, self.empty_weight, reduction='none'
+        )
+        keep = unmatched_query_keep_mask(outputs['pred_boxes'], targets, indices)
+        loss_ce = (loss_ce * keep).sum() / keep.sum().clamp_min(1)
         losses = {'loss_ce': loss_ce}
 
         if log:
@@ -84,6 +89,7 @@ class RTDETRCriterion(nn.Module):
 
         target = F.one_hot(target_classes, num_classes=self.num_classes+1)[..., :-1]
         loss = torchvision.ops.sigmoid_focal_loss(src_logits, target, self.alpha, self.gamma, reduction='none')
+        loss = apply_query_keep_mask(loss, outputs['pred_boxes'], targets, indices)
         loss = loss.mean(1).sum() * src_logits.shape[1] / num_boxes
 
         return {'loss_focal': loss}
@@ -112,6 +118,7 @@ class RTDETRCriterion(nn.Module):
         weight = self.alpha * pred_score.pow(self.gamma) * (1 - target) + target_score
         
         loss = F.binary_cross_entropy_with_logits(src_logits, target_score, weight=weight, reduction='none')
+        loss = apply_query_keep_mask(loss, outputs['pred_boxes'], targets, indices)
         loss = loss.mean(1).sum() * src_logits.shape[1] / num_boxes
         return {'loss_vfl': loss}
 
@@ -276,7 +283,5 @@ def accuracy(output, target, topk=(1,)):
         correct_k = correct[:k].view(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
-
-
 
 

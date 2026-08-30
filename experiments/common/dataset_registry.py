@@ -77,6 +77,11 @@ def apply_yolo_dataset_profile(config: Dict[str, Any], profile: Dict[str, Any]) 
         raise ValueError("数据集配置缺少 data_yaml")
 
     merged_data["data_yaml"] = data_yaml
+    # YOLO 的标签来自 data.yaml，但 UA-DETRAC 的 ignore regions 只在 COCO
+    # annotations 中。保留根目录，供训练器生成带 ignore 标注的运行时 data.yaml。
+    root = profile.get("coco_data_root")
+    if root:
+        merged_data["coco_data_root"] = str(root)
     merged["data"] = merged_data
 
     if "num_workers" in profile and "num_workers" not in merged_misc:

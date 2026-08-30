@@ -254,6 +254,12 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         coco_annotations: List[Dict[str, Any]] = []
         coco_predictions: List[Dict[str, Any]] = []
         img_sizes: Dict[int, Tuple[int, int]] = {}
+        ignore_regions_by_image_id: Dict[int, List[Dict[str, Any]]] = {}
+        protocol_meta_by_stem = (
+            self._load_coco_meta_by_stem(coco_ann_file)
+            if coco_ann_file is not None and coco_ann_file.is_file()
+            else {}
+        )
         ann_id = 0
 
         for batch_start in range(0, len(eval_images), batch_size):
@@ -291,6 +297,12 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
                     entries = raw
                 else:
                     entries = []
+                protocol_meta = protocol_meta_by_stem.get(p.stem, {})
+                ignore_regions = (
+                    raw.get('ignore_regions', []) if isinstance(raw, dict) else []
+                ) or protocol_meta.get('ignore_regions', [])
+                if ignore_regions:
+                    ignore_regions_by_image_id[img_id] = ignore_regions
 
                 for entry in entries:
                     cls_id = int(entry['class_id'])
@@ -356,7 +368,12 @@ class FasterRCNNTrainer(BaseYOLOTrainer):
         ]
         coco_gt = {
             'images': [
-                {'id': i, 'width': img_sizes[i][0], 'height': img_sizes[i][1]}
+                {
+                    'id': i,
+                    'width': img_sizes[i][0],
+                    'height': img_sizes[i][1],
+                    'ignore_regions': ignore_regions_by_image_id.get(i, []),
+                }
                 for i in sorted(img_sizes)
             ],
             'categories': categories,

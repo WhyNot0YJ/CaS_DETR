@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import torch
+from common.uadetrac_ignore import filter_tensor_predictions_by_ignore
 
 from ...core import register
 from .coco_eval import CocoEvaluator
@@ -53,6 +54,9 @@ class CocoEvaluatorTrainLabelAdapter:
         return self._inner.cleanup()
 
     def update(self, predictions):
+        predictions = filter_tensor_predictions_by_ignore(
+            predictions, self.coco_gt.dataset
+        )
         return self._inner.update(self._remap_predictions(predictions))
 
     def synchronize_between_processes(self):

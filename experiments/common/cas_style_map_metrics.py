@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import os
-import sys
-from io import StringIO
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 from common.det_eval_metrics import (
@@ -17,6 +14,7 @@ from common.det_eval_metrics import (
     coco_area_ap_at_iou50,
     canonical_category_metric_name,
     extract_per_category_ap_from_coco_eval,
+    run_coco_bbox_eval,
     small_object_diagnostic_area_ap,
 )
 from common.small_object_diagnostics import small_object_diagnostic_spec
@@ -49,33 +47,28 @@ def _run_coco_eval(
             w, h = img_w, img_h
         coco_gt["images"].append({"id": img_id, "width": w, "height": h})
 
-    for i, target in enumerate(targets):
+    ignore_regions: Dict[int, set[Tuple[float, float, float, float]]] = {}
+    ordinary_targets = []
+    for target in targets:
+        if target.get("uadetrac_ignore"):
+            image_id = int(target["image_id"])
+            ignore_regions.setdefault(image_id, set()).add(
+                tuple(float(value) for value in target["bbox"])
+            )
+        else:
+            ordinary_targets.append(target)
+    for image in coco_gt["images"]:
+        boxes = sorted(ignore_regions.get(int(image["id"]), set()))
+        if boxes:
+            image["ignore_regions"] = [{"bbox": list(box)} for box in boxes]
+
+    for i, target in enumerate(ordinary_targets):
         ann = dict(target)
         ann["id"] = i + 1
         coco_gt["annotations"].append(ann)
-
-    old_stdout = sys.stdout
-    sys.stdout = StringIO()
-    try:
-        coco_gt_obj = COCO()
-        coco_gt_obj.dataset = coco_gt
-        coco_gt_obj.createIndex()
-        coco_dt = coco_gt_obj.loadRes(predictions)
-        coco_eval = COCOeval(coco_gt_obj, coco_dt, "bbox")
-        coco_eval.evaluate()
-        coco_eval.accumulate()
-    finally:
-        sys.stdout = old_stdout
-
-    if print_summary:
+    coco_eval = run_coco_bbox_eval(coco_gt, predictions)
+    if print_summary and coco_eval is not None:
         coco_eval.summarize()
-    else:
-        sys.stdout = StringIO()
-        try:
-            coco_eval.summarize()
-        finally:
-            sys.stdout = old_stdout
-
     return coco_eval
 
 

@@ -36,6 +36,15 @@ _cfg_dict_for_vis, _maybe_run_train_end_vis = _load_train_end_vis()
 from .det_engine import evaluate, train_one_epoch
 
 
+def _should_run_epoch(epoch, total_epochs, frequency, extra_epochs=(), from_epoch=None):
+    return (
+        epoch == total_epochs - 1
+        or (from_epoch is not None and epoch >= from_epoch)
+        or epoch in extra_epochs
+        or (epoch + 1) % max(1, frequency) == 0
+    )
+
+
 class DetSolver(BaseSolver):
     def fit(self):
         self.train()
@@ -59,7 +68,13 @@ class DetSolver(BaseSolver):
         best_stat = {
             "epoch": -1,
         }
-        if self.last_epoch > 0:
+        if self.last_epoch > 0 and _should_run_epoch(
+            self.last_epoch,
+            args.epochs,
+            getattr(args, "eval_freq", 1),
+            getattr(args, "eval_at_epochs", ()),
+            getattr(args, "eval_from_epoch", None),
+        ):
             module = self.ema.module if self.ema else self.model
             test_stats, coco_evaluator = evaluate(
                 module,
@@ -117,26 +132,30 @@ class DetSolver(BaseSolver):
 
             self.last_epoch += 1
 
-            if self.output_dir and epoch < self.train_dataloader.collate_fn.stop_epoch:
-                checkpoint_paths = [self.output_dir / "last.pth"]
-                # extra checkpoint before LR drop and every 100 epochs
-                if (epoch + 1) % args.checkpoint_freq == 0:
-                    checkpoint_paths.append(self.output_dir / f"checkpoint{epoch:04}.pth")
-                for checkpoint_path in checkpoint_paths:
-                    dist_utils.save_on_master(self.state_dict(), checkpoint_path)
+            if self.output_dir:
+                dist_utils.save_on_master(self.state_dict(), self.output_dir / "last.pth")
 
-            module = self.ema.module if self.ema else self.model
-            test_stats, coco_evaluator = evaluate(
-                module,
-                self.criterion,
-                self.postprocessor,
-                self.val_dataloader,
-                self.evaluator,
-                self.device,
+            should_evaluate = _should_run_epoch(
                 epoch,
-                self.use_wandb,
-                output_dir=self.output_dir,
+                args.epochs,
+                getattr(args, "eval_freq", 1),
+                getattr(args, "eval_at_epochs", ()),
+                getattr(args, "eval_from_epoch", None),
             )
+            test_stats, coco_evaluator = {}, None
+            if should_evaluate:
+                module = self.ema.module if self.ema else self.model
+                test_stats, coco_evaluator = evaluate(
+                    module,
+                    self.criterion,
+                    self.postprocessor,
+                    self.val_dataloader,
+                    self.evaluator,
+                    self.device,
+                    epoch,
+                    self.use_wandb,
+                    output_dir=self.output_dir,
+                )
 
             # TODO
             for k in test_stats:
@@ -200,7 +219,7 @@ class DetSolver(BaseSolver):
                 "n_parameters": n_parameters,
             }
 
-            if self.use_wandb:
+            if self.use_wandb and should_evaluate:
                 wandb_logs = {}
                 for idx, metric_name in enumerate(metric_names):
                     wandb_logs[f"metrics/{metric_name}"] = test_stats["coco_eval_bbox"][idx]

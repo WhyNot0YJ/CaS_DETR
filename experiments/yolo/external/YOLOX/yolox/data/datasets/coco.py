@@ -67,6 +67,11 @@ class COCODataset(CacheDataset):
 
         self.coco = COCO(os.path.join(self.data_dir, "annotations", self.json_file))
         remove_useless_info(self.coco)
+        self.ignore_regions = {
+            int(image["id"]): image.get("ignore_regions", [])
+            for image in self.coco.dataset.get("images", [])
+            if image.get("ignore_regions")
+        }
         self.ids = self.coco.getImgIds()
         self.num_imgs = len(self.ids)
         self.class_ids = sorted(self.coco.getCatIds())
@@ -117,6 +122,18 @@ class COCODataset(CacheDataset):
             cls = self.class_ids.index(obj["category_id"])
             res[ix, 0:4] = obj["clean_bbox"]
             res[ix, 4] = cls
+
+        ignores = self.ignore_regions.get(int(id_), [])
+        if ignores:
+            ignored = np.zeros((len(ignores), 5), dtype=np.float32)
+            for ix, region in enumerate(ignores):
+                x, y, w, h = region["bbox"] if isinstance(region, dict) else region
+                ignored[ix, :4] = [
+                    max(0, x), max(0, y), min(width, x + max(0, w)), min(height, y + max(0, h)),
+                ]
+                ignored[ix, 4] = -1
+            ignored = ignored[(ignored[:, 2] > ignored[:, 0]) & (ignored[:, 3] > ignored[:, 1])]
+            res = np.concatenate((res, ignored))
 
         r = min(self.img_size[0] / height, self.img_size[1] / width)
         res[:, :4] *= r

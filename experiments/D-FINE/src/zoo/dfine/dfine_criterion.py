@@ -13,6 +13,7 @@ import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+from common.uadetrac_ignore import apply_query_keep_mask
 
 from ...core import register
 from ...misc.dist_utils import get_world_size, is_dist_available_and_initialized
@@ -83,6 +84,7 @@ class DFINECriterion(nn.Module):
         loss = torchvision.ops.sigmoid_focal_loss(
             src_logits, target, self.alpha, self.gamma, reduction="none"
         )
+        loss = apply_query_keep_mask(loss, outputs["pred_boxes"], targets, indices)
         loss = loss.mean(1).sum() * src_logits.shape[1] / num_boxes
 
         return {"loss_focal": loss}
@@ -117,6 +119,7 @@ class DFINECriterion(nn.Module):
         loss = F.binary_cross_entropy_with_logits(
             src_logits, target_score, weight=weight, reduction="none"
         )
+        loss = apply_query_keep_mask(loss, outputs["pred_boxes"], targets, indices)
         loss = loss.mean(1).sum() * src_logits.shape[1] / num_boxes
         return {"loss_vfl": loss}
 

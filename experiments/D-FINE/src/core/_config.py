@@ -70,6 +70,9 @@ class BaseConfig(object):
         self.seed: int = None
         self.print_freq: int = None
         self.checkpoint_freq: int = 1
+        self.eval_freq: int = 1
+        self.eval_at_epochs: List[int] = []
+        self.eval_from_epoch: int = None
         self.output_dir: str = None
         self.summary_dir: str = None
         self.device: str = ""

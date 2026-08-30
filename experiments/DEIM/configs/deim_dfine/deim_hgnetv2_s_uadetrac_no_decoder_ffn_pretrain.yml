@@ -15,7 +15,7 @@ warmup_iter: 500
 
 train_dataloader:
   total_batch_size: 16
-  num_workers: 12
+  num_workers: 8
   pin_memory: False
   dataset:
     transforms:
@@ -29,5 +29,5 @@ train_dataloader:
 
 val_dataloader:
   total_batch_size: 64
-  num_workers: 12
+  num_workers: 8
   pin_memory: False

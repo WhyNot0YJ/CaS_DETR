@@ -15,14 +15,15 @@ from PIL import Image, ImageDraw, ImageFont
 DATA_ROOT = Path("/root/autodl-fs/datasets/UA-DETRAC_COCO")
 DEFAULT_ANNOTATIONS = DATA_ROOT / "annotations/instances_test.json"
 DEFAULT_PREDICTIONS = Path(
-    "CaS-DETR/outputs/uadetrac/main/"
-    "cas_detr_cass_moe_sg_ccff_cap2x_hgnetv2_s/predictions_test.json"
+    "experiments/RT-DETR/rtdetrv2_pytorch/outputs/uadetrac/"
+    "batch_rtdetrv2_r18vd_uadetrac_no_decoder_ffn_pretrain_uadetrac/predictions_test.json"
 )
 DEFAULT_OUTPUT = DEFAULT_PREDICTIONS.parent / "sequence_gt_prediction_comparisons"
 SMALL_AREA = 32 * 32
 PREDICTION_SCORE = 0.20
 MAX_PREDICTIONS = 30
 COLORS = {1: "#22c55e", 2: "#38bdf8", 3: "#f59e0b", 4: "#e879f9"}
+IGNORE_COLOR = "#fb7185"
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,14 +66,31 @@ def label(draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, color: 
     draw.text(xy, text, fill="black", font=font)
 
 
+def draw_ignore_regions(image: Image.Image, ignore_regions: list[dict]) -> Image.Image:
+    """Overlay UA-DETRAC's annotation-defined ignore regions on an image."""
+    result = image.copy()
+    overlay = Image.new("RGBA", result.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    font = load_font(15)
+    for region in ignore_regions:
+        x, y, width, height = region["bbox"]
+        x2, y2 = x + width, y + height
+        draw.rectangle((x, y, x2, y2), fill=(251, 113, 133, 70), outline=IGNORE_COLOR, width=3)
+        box = draw.textbbox((x + 4, y + 3), "IGNORE", font=font)
+        draw.rectangle((box[0] - 2, box[1] - 1, box[2] + 2, box[3] + 1), fill=IGNORE_COLOR)
+        draw.text((x + 4, y + 3), "IGNORE", fill="black", font=font)
+    return Image.alpha_composite(result.convert("RGBA"), overlay).convert("RGB")
+
+
 def draw_gt(
     image: Image.Image,
     annotations: list[dict],
+    ignore_regions: list[dict],
     names: dict[int, str],
     focus: dict,
     focus_kind: str,
 ) -> Image.Image:
-    result = image.copy()
+    result = draw_ignore_regions(image, ignore_regions)
     draw = ImageDraw.Draw(result)
     small_font = load_font(15)
     for ann in annotations:
@@ -86,11 +104,12 @@ def draw_predictions(
     image: Image.Image,
     predictions: list[dict],
     annotations: list[dict],
+    ignore_regions: list[dict],
     names: dict[int, str],
     focus: dict,
     focus_kind: str,
 ) -> tuple[Image.Image, dict | None, float]:
-    result = image.copy()
+    result = draw_ignore_regions(image, ignore_regions)
     draw = ImageDraw.Draw(result)
     small_font = load_font(15)
     visible = sorted(
@@ -128,13 +147,16 @@ def make_comparison(
     frame_num: int,
     weather: str,
     annotations: list[dict],
+    ignore_regions: list[dict],
     predictions: list[dict],
     names: dict[int, str],
     focus: dict,
     focus_kind: str,
 ) -> tuple[Image.Image, float, float]:
-    gt = draw_gt(image, annotations, names, focus, focus_kind)
-    pred, best_prediction, best_iou = draw_predictions(image, predictions, annotations, names, focus, focus_kind)
+    gt = draw_gt(image, annotations, ignore_regions, names, focus, focus_kind)
+    pred, best_prediction, best_iou = draw_predictions(
+        image, predictions, annotations, ignore_regions, names, focus, focus_kind
+    )
     crop = crop_box(image, focus)
     gt_crop = gt.crop(crop).resize((540, 540), Image.Resampling.NEAREST)
     pred_crop = pred.crop(crop).resize((540, 540), Image.Resampling.NEAREST)
@@ -152,7 +174,10 @@ def make_comparison(
     draw.text((18, 18), f"{sequence} | frame {frame_num} | {weather}", fill="white", font=title_font)
     draw.text((18, header_height + 12), "GROUND TRUTH", fill="white", font=text_font)
     draw.text((image.width + 18, header_height + 12), f"PREDICTIONS score >= {PREDICTION_SCORE:.2f}, top {MAX_PREDICTIONS}", fill="white", font=text_font)
-    focus_text = f"{focus_kind}: {focus['bbox'][2]:.1f} x {focus['bbox'][3]:.1f}px | best car IoU={best_iou:.2f}"
+    focus_text = (
+        f"{focus_kind}: {focus['bbox'][2]:.1f} x {focus['bbox'][3]:.1f}px | "
+        f"ignore regions={len(ignore_regions)} | best car IoU={best_iou:.2f}"
+    )
     if best_prediction is not None:
         focus_text += f" score={best_prediction['score']:.2f}"
     draw.text((18, header_height + image.height + 8), focus_text, fill="white", font=text_font)
@@ -226,6 +251,7 @@ def main() -> None:
                 selected["frame_num"],
                 selected.get("weather", "unknown"),
                 annotations,
+                selected.get("ignore_regions", []),
                 predictions_by_image[selected["id"]],
                 names,
                 focus,
@@ -239,6 +265,7 @@ def main() -> None:
             "weather": selected.get("weather", "unknown"),
             "image": selected["file_name"],
             "gt_boxes": len(annotations),
+            "ignore_regions": len(selected.get("ignore_regions", [])),
             "small_car_gt": small_car_count,
             "focus_type": focus_kind.removeprefix("focus ").replace(" ", "_"),
             "focus_bbox": " ".join(f"{value:.1f}" for value in focus["bbox"]),

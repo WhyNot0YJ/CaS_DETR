@@ -12,7 +12,7 @@ epochs: 132
 
 train_dataloader:
   total_batch_size: 16
-  num_workers: 12
+  num_workers: 8
   dataset:
     transforms:
       policy:
@@ -24,4 +24,4 @@ train_dataloader:
 
 val_dataloader:
   total_batch_size: 64
-  num_workers: 12
+  num_workers: 8

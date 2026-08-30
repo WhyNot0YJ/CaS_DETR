@@ -216,6 +216,23 @@ def collect_rtdetr_predictions_and_targets(
                             }
                         )
 
+                ignore_boxes = tgt.get("ignore_boxes")
+                if ignore_boxes is not None and ignore_boxes.numel():
+                    ignore_xywh = _gt_to_xywh_numpy(
+                        ignore_boxes, current_w, current_h, orig_w, orig_h, lb_pad, lb_scale
+                    )
+                    for bbox in ignore_xywh:
+                        for category in dataset.categories:
+                            all_targets.append({
+                                "image_id": image_id,
+                                "category_id": int(category["id"]),
+                                "bbox": bbox.tolist(),
+                                "area": float(bbox[2] * bbox[3]),
+                                "bbox_height": float(bbox[3]),
+                                "iscrowd": 1,
+                                "uadetrac_ignore": 1,
+                            })
+
                 if "labels" not in tgt or "boxes" not in tgt:
                     continue
                 true_labels = tgt["labels"]

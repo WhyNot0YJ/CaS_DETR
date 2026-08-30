@@ -11,6 +11,10 @@ import torch
 import torchvision
 import os
 from PIL import Image
+from common.uadetrac_ignore import (
+    IGNORE_LABEL, canonical_ignore_boxes,
+    ignore_regions_xyxy,
+)
 
 from ...core import register
 from .._misc import convert_to_tv_tensor
@@ -30,7 +34,8 @@ class CocoDetection(FasterCocoDetection, DetDataset):
     __share__ = ["remap_mscoco_category"]
 
     def __init__(
-        self, img_folder, ann_file, transforms, return_masks=False, remap_mscoco_category=False
+        self, img_folder, ann_file, transforms, return_masks=False,
+        remap_mscoco_category=False, use_ignore_regions=False,
     ):
         super(FasterCocoDetection, self).__init__(img_folder, ann_file)
         self._transforms = transforms
@@ -39,18 +44,32 @@ class CocoDetection(FasterCocoDetection, DetDataset):
         self.ann_file = ann_file
         self.return_masks = return_masks
         self.remap_mscoco_category = remap_mscoco_category
+        self.use_ignore_regions = use_ignore_regions
 
     def __getitem__(self, idx):
         img, target = self.load_item(idx)
         if self._transforms is not None:
             img, target, _ = self._transforms(img, target, self)
+        if self.use_ignore_regions:
+            ignore = target["labels"] == IGNORE_LABEL
+            height, width = img.shape[-2:] if isinstance(img, torch.Tensor) else img.size[::-1]
+            target["ignore_boxes"] = canonical_ignore_boxes(
+                target["boxes"][ignore], height=height, width=width
+            )
+            for key in ("boxes", "labels", "area", "iscrowd", "masks", "keypoints"):
+                value = target.get(key)
+                if isinstance(value, torch.Tensor) and value.ndim and value.shape[0] == ignore.shape[0]:
+                    target[key] = value[~ignore]
+            target["boxes"] = canonical_ignore_boxes(target["boxes"], height=height, width=width)
         return img, target
 
     def load_item(self, idx):
         image, target = super(FasterCocoDetection, self).__getitem__(idx)
         image_id = self.ids[idx]
         image_path = os.path.join(self.img_folder, self.coco.loadImgs(image_id)[0]["file_name"])
-        target = {"image_id": image_id, "image_path": image_path, "annotations": target}
+        image_info = self.coco.imgs[image_id]
+        target = {"image_id": image_id, "image_path": image_path, "annotations": target,
+                  "ignore_regions": image_info.get("ignore_regions", []) if self.use_ignore_regions else []}
 
         if self.remap_mscoco_category:
             image, target = self.prepare(image, target, category2label=mscoco_category2label)
@@ -133,6 +152,9 @@ class ConvertCocoPolysToMask(object):
         image_path = target["image_path"]
 
         anno = target["annotations"]
+        ignore_boxes = ignore_regions_xyxy(
+            {"ignore_regions": target.get("ignore_regions", [])}, width=w, height=h
+        )
 
         anno = [obj for obj in anno if "iscrowd" not in obj or obj["iscrowd"] == 0]
 
@@ -186,6 +208,19 @@ class ConvertCocoPolysToMask(object):
         iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
         target["area"] = area[keep]
         target["iscrowd"] = iscrowd[keep]
+
+        if ignore_boxes:
+            if self.return_masks or keypoints is not None:
+                raise ValueError("ignore_regions are only supported for bbox detection targets")
+            ignore_tensor = torch.as_tensor(ignore_boxes, dtype=torch.float32).reshape(-1, 4)
+            target["boxes"] = torch.cat((target["boxes"], ignore_tensor), dim=0)
+            target["labels"] = torch.cat((target["labels"], torch.full(
+                (len(ignore_tensor),), IGNORE_LABEL, dtype=torch.int64)))
+            target["area"] = torch.cat((target["area"],
+                (ignore_tensor[:, 2] - ignore_tensor[:, 0]) *
+                (ignore_tensor[:, 3] - ignore_tensor[:, 1])))
+            target["iscrowd"] = torch.cat((target["iscrowd"], torch.ones(
+                len(ignore_tensor), dtype=target["iscrowd"].dtype)))
 
         target["orig_size"] = torch.as_tensor([int(w), int(h)])
         # target["size"] = torch.as_tensor([int(w), int(h)])

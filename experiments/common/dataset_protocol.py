@@ -136,11 +136,17 @@ def _dataset_update(
 ) -> Dict[str, Any]:
     if rtdetr_layout:
         img_folder = root if dataset == "dairv2x" else root / split
-        return {"data_root": str(root), "img_folder": str(img_folder), "split": split}
+        return {
+            "data_root": str(root),
+            "img_folder": str(img_folder),
+            "split": split,
+            "use_ignore_regions": dataset == "uadetrac",
+        }
     img_folder = root if dataset == "dairv2x" else root / split
     return {
         "img_folder": str(img_folder),
         "ann_file": str(root / "annotations" / f"instances_{split}.json"),
+        "use_ignore_regions": dataset == "uadetrac",
     }
 
 

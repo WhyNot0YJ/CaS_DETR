@@ -333,6 +333,32 @@ class BaseYOLOTrainer(ABC):
         train_kwargs['exist_ok'] = self.checkpoint_config.get('exist_ok', True)
         return train_kwargs
 
+    def _is_uadetrac_ignore_protocol(self) -> bool:
+        data_yaml = str(self.data_config.get("data_yaml", "")).lower()
+        return ("uadetrac" in data_yaml or "ua-detrac" in data_yaml) or (
+            os.environ.get("EXPERIMENT_DATASET_PROTOCOL", "").lower() == "uadetrac"
+        )
+
+    def _ultralytics_ignore_data_yaml(self) -> Optional[Path]:
+        """Write a run-local dataset YAML that explicitly points at COCO ignore annotations."""
+        if not self._is_uadetrac_ignore_protocol():
+            return None
+        coco_root = Path(str(self.data_config.get("coco_data_root", ""))).expanduser()
+        annotations = [
+            coco_root / "annotations" / f"instances_{split}.json"
+            for split in ("train", "val", "test")
+        ]
+        annotations = [path for path in annotations if path.is_file()]
+        if not annotations:
+            raise FileNotFoundError(
+                "UA-DETRAC YOLO 训练需要 data.coco_data_root/annotations/instances_{train,val,test}.json 的 ignore_regions"
+            )
+        data = yaml.safe_load(Path(self._resolve_data_yaml()).read_text(encoding="utf-8")) or {}
+        data["ignore_coco_anns"] = [str(path) for path in annotations]
+        path = self.log_dir / "uadetrac_ignore_data.yaml"
+        path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        return path
+
     def _log_training_config(self, train_kwargs: Dict):
         """记录训练配置信息"""
         self.logger.info("=" * 80)
@@ -418,7 +444,13 @@ class BaseYOLOTrainer(ABC):
         
         # 执行训练
         try:
-            results = model.train(**train_kwargs)
+            if self._is_uadetrac_ignore_protocol():
+                from uadetrac_ultralytics import build_ignore_detection_trainer
+
+                train_kwargs["data"] = str(self._ultralytics_ignore_data_yaml())
+                results = model.train(trainer=build_ignore_detection_trainer(), **train_kwargs)
+            else:
+                results = model.train(**train_kwargs)
             self._post_training_processing(model)
             return results
         except Exception as e:
@@ -513,6 +545,7 @@ class BaseYOLOTrainer(ABC):
                 'image_id': image_id,
                 'objects': objects,
                 'weather': image.get('weather', ''),
+                'ignore_regions': image.get('ignore_regions', []),
             }
         return meta_by_stem
 
@@ -792,6 +825,11 @@ class BaseYOLOTrainer(ABC):
                         f"{eval_split} 未找到 labels_meta 或 COCO 标注，跳过"
                     )
                     continue
+                protocol_meta_by_stem = (
+                    self._load_coco_meta_by_stem(coco_ann_file)
+                    if coco_ann_file and coco_ann_file.is_file()
+                    else {}
+                )
 
                 eval_images = sorted(
                     p
@@ -817,6 +855,7 @@ class BaseYOLOTrainer(ABC):
                 coco_annotations: List[Dict[str, Any]] = []
                 coco_predictions: List[Dict[str, Any]] = []
                 weather_by_image_id: Dict[int, str] = {}
+                ignore_regions_by_image_id: Dict[int, List[Dict[str, Any]]] = {}
                 ann_id = 0
 
                 eval_batch_size = self._coco_eval_batch_size()
@@ -873,6 +912,16 @@ class BaseYOLOTrainer(ABC):
                         debug_image_ids.add(eval_image_id)
                         if weather:
                             weather_by_image_id[eval_image_id] = weather
+                        protocol_meta = protocol_meta_by_stem.get(img_path.stem, {})
+                        ignore_regions = (
+                            raw.get('ignore_regions', [])
+                            if isinstance(raw, dict) and raw.get('ignore_regions') is not None
+                            else protocol_meta.get('ignore_regions', [])
+                        )
+                        if not ignore_regions:
+                            ignore_regions = protocol_meta.get('ignore_regions', [])
+                        if ignore_regions:
+                            ignore_regions_by_image_id[eval_image_id] = ignore_regions
 
                         for entry in entries:
                             cls = int(entry['class_id'])
@@ -976,6 +1025,7 @@ class BaseYOLOTrainer(ABC):
                             'id': image_id,
                             'width': w,
                             'height': h,
+                            'ignore_regions': ignore_regions_by_image_id.get(image_id, []),
                         }
                         for image_id, (w, h) in img_sizes.items()
                     ],

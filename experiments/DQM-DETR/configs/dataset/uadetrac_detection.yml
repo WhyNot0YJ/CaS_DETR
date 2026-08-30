@@ -18,6 +18,7 @@ train_dataloader:
     img_folder: /root/autodl-fs/datasets/UA-DETRAC_COCO/train
     ann_file: /root/autodl-fs/datasets/UA-DETRAC_COCO/annotations/instances_train.json
     return_masks: False
+    use_ignore_regions: True
   shuffle: True
   num_workers: 4
   drop_last: True
@@ -31,6 +32,7 @@ val_dataloader:
     img_folder: /root/autodl-fs/datasets/UA-DETRAC_COCO/test
     ann_file: /root/autodl-fs/datasets/UA-DETRAC_COCO/annotations/instances_test.json
     return_masks: False
+    use_ignore_regions: True
   shuffle: False
   num_workers: 4
   drop_last: False
