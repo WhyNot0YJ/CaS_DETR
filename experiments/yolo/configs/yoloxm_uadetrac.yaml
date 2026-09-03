@@ -5,8 +5,6 @@ model:
 
 training:
   epochs: 132
-  no_aug_epochs: 32
-  batch_size: 8
 
 data:
   data_yaml: "/root/autodl-fs/datasets/UA-DETRAC_YOLO/data.yaml"

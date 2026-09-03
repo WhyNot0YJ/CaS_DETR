@@ -1,0 +1,1 @@
+run_id,framework,dataset,seed,checkpoint_sha256,config_sha256,training_taxonomy,evaluation_taxonomy,postprocess,result_type,model,engine,batch_size,warmup,iterations,execution,aux_streams,peak_memory_mib,gpu,driver,tensorrt,cuda,mode,mean_latency_ms,p50_latency_ms,p95_latency_ms,fps

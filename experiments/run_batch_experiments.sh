@@ -44,7 +44,7 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --yolov8                        # 只运行YOLOv8实验
 #   ./run_batch_experiments.sh --yolov12                       # 只运行YOLOv12实验
 #   ./run_batch_experiments.sh --yolox                         # 只运行 YOLOX（Megvii）实验
-#   ./run_batch_experiments.sh --yolo                          # 一键：YOLOv5+v8+v12+YOLOX（常与 --n/--s/--m 组合）
+#   ./run_batch_experiments.sh --yolo                          # 一键：YOLOv5+v8+v12+YOLOX（常与 --s/--m 组合）
 #   ./run_batch_experiments.sh --yolo --s                      # 仅 s 规模（两数据集全跑）
 #   ./run_batch_experiments.sh --yes --test --yolo --m --dairv2x  # 测试模式仅 DAIR 的 m 规模 YOLO 全家桶
 #   ./run_batch_experiments.sh --fasterrcnn                    # 只运行 torchvision Faster R-CNN（DAIR + UA-DETRAC）
@@ -65,7 +65,6 @@ EXPERIMENT_SEED="${EXPERIMENT_SEED:-0}"
 #   ./run_batch_experiments.sh --test --yolox                  # 测试模式只运行 YOLOX
 #   ./run_batch_experiments.sh --test --fasterrcnn             # 测试模式只运行 Faster R-CNN
 #   ./run_batch_experiments.sh --r18                           # 只运行ResNet-18实验
-#   ./run_batch_experiments.sh --n                             # 只运行所有 n 规模 YOLO（v5/v8/v12）
 #   ./run_batch_experiments.sh --s                             # 只运行所有 s 规模 YOLO / YOLOX
 #   ./run_batch_experiments.sh --m                             # 只运行所有 m 规模 YOLO / YOLOX
 #   ./run_batch_experiments.sh --custom cfg1.yaml cfg2.yaml    # 自定义配置列表
@@ -110,7 +109,6 @@ DRY_RUN=false
 # --dairv2x / --uadetrac（或 --dataset）解析后写入；二者同时为 true 时不筛选
 SCOPE_DAIRV2X=false
 SCOPE_UADETRAC=false
-SCOPE_SIZE_N=false
 SCOPE_SIZE_S=false
 SCOPE_SIZE_M=false
 TOTAL_PLANNED_RUNS=0
@@ -237,19 +235,15 @@ apply_dataset_scope_filter_to_configs() {
 
 _path_allowed_by_model_size_scope() {
     local path="$1"
-    local want_n="$2"
-    local want_s="$3"
-    local want_m="$4"
+    local want_s="$2"
+    local want_m="$3"
     local base
     base=$(basename "$path")
-    # 仅 YOLO / YOLOX 的 yaml 受 --n/--s/--m 筛选；其它（如 RT-DETRv2、CaS）不受规模开关影响
+    # 仅 YOLO / YOLOX 的 yaml 受 --s/--m 筛选；其它（如 RT-DETRv2、CaS）不受规模开关影响
     if [[ "$base" != yolov* ]] && [[ "$base" != yolox* ]]; then
         return 0
     fi
 
-    if [[ "$base" =~ ^yolov(5|8|12)n_.*\.yaml$ ]]; then
-        [ "$want_n" = true ] && return 0 || return 1
-    fi
     if [[ "$base" =~ ^(yolov(5|8|12)s_|yoloxs_).*.yaml$ ]]; then
         [ "$want_s" = true ] && return 0 || return 1
     fi
@@ -261,27 +255,24 @@ _path_allowed_by_model_size_scope() {
 }
 
 apply_model_size_filter_to_configs() {
-    if [ "$SCOPE_SIZE_N" != true ] && [ "$SCOPE_SIZE_S" != true ] && [ "$SCOPE_SIZE_M" != true ]; then
+    if [ "$SCOPE_SIZE_S" != true ] && [ "$SCOPE_SIZE_M" != true ]; then
         return 0
     fi
-    local want_n=false
     local want_s=false
     local want_m=false
-    [ "$SCOPE_SIZE_N" = true ] && want_n=true
     [ "$SCOPE_SIZE_S" = true ] && want_s=true
     [ "$SCOPE_SIZE_M" = true ] && want_m=true
     local before=${#CONFIGS_TO_RUN[@]}
     local filtered=()
     local p
     for p in "${CONFIGS_TO_RUN[@]}"; do
-        if _path_allowed_by_model_size_scope "$p" "$want_n" "$want_s" "$want_m"; then
+        if _path_allowed_by_model_size_scope "$p" "$want_s" "$want_m"; then
             filtered+=("$p")
         fi
     done
     CONFIGS_TO_RUN=("${filtered[@]}")
 
     local selected_sizes=()
-    [ "$want_n" = true ] && selected_sizes+=("n")
     [ "$want_s" = true ] && selected_sizes+=("s")
     [ "$want_m" = true ] && selected_sizes+=("m")
     local size_str
@@ -289,7 +280,7 @@ apply_model_size_filter_to_configs() {
     log_info "模型规模筛选: ${size_str}"
 
     if [ "$before" -gt 0 ] && [ ${#CONFIGS_TO_RUN[@]} -eq 0 ]; then
-        log_warning "按模型规模筛选后队列为空，请使用 --yolo 或同时开启 --yolov5/--yolov8/--yolov12/--yolox，并检查 --n/--s/--m"
+        log_warning "按模型规模筛选后队列为空，请使用 --yolo 或同时开启 --yolov5/--yolov8/--yolov12/--yolox，并检查 --s/--m"
     fi
 }
 
@@ -407,8 +398,6 @@ for _key in "${!DQM_DEGRADATION_CONFIGS[@]}"; do DQM_DETR_CONFIGS[$_key]="${DQM_
 for _key in "${!DQM_MAIN_CONFIGS[@]}"; do DQM_DETR_CONFIGS[$_key]="${DQM_MAIN_CONFIGS[$_key]}"; done
 
 declare -A YOLOV5_CONFIGS=(
-    ["yolov5n-dairv2x"]="yolo/configs/yolov5n_dairv2x.yaml"
-    ["yolov5n-uadetrac"]="yolo/configs/yolov5n_uadetrac.yaml"
     ["yolov5s-dairv2x"]="yolo/configs/yolov5s_dairv2x.yaml"
     ["yolov5s-uadetrac"]="yolo/configs/yolov5s_uadetrac.yaml"
     ["yolov5m-dairv2x"]="yolo/configs/yolov5m_dairv2x.yaml"
@@ -416,8 +405,6 @@ declare -A YOLOV5_CONFIGS=(
 )
 
 declare -A YOLOV8_CONFIGS=(
-    ["yolov8n-dairv2x"]="yolo/configs/yolov8n_dairv2x.yaml"
-    ["yolov8n-uadetrac"]="yolo/configs/yolov8n_uadetrac.yaml"
     ["yolov8s-dairv2x"]="yolo/configs/yolov8s_dairv2x.yaml"
     ["yolov8s-uadetrac"]="yolo/configs/yolov8s_uadetrac.yaml"
     ["yolov8m-dairv2x"]="yolo/configs/yolov8m_dairv2x.yaml"
@@ -425,8 +412,6 @@ declare -A YOLOV8_CONFIGS=(
 )
 
 declare -A YOLOV12_CONFIGS=(
-    ["yolov12n-dairv2x"]="yolo/configs/yolov12n_dairv2x.yaml"
-    ["yolov12n-uadetrac"]="yolo/configs/yolov12n_uadetrac.yaml"
     ["yolov12s-dairv2x"]="yolo/configs/yolov12s_dairv2x.yaml"
     ["yolov12s-uadetrac"]="yolo/configs/yolov12s_uadetrac.yaml"
     ["yolov12m-dairv2x"]="yolo/configs/yolov12m_dairv2x.yaml"
@@ -656,7 +641,6 @@ parse_arguments() {
     local has_test=false
     local has_main=false
     local has_r18=false
-    local has_n=false
     local has_s=false
     local has_m=false
     local has_k05=false
@@ -700,12 +684,6 @@ parse_arguments() {
         fi
         if [ "$arg" == "--r18" ]; then
             has_r18=true
-            idx=$((idx + 1))
-            continue
-        fi
-        if [ "$arg" == "--n" ]; then
-            has_n=true
-            SCOPE_SIZE_N=true
             idx=$((idx + 1))
             continue
         fi
@@ -776,8 +754,8 @@ parse_arguments() {
     if [ "$SCOPE_DAIRV2X" = true ] || [ "$SCOPE_UADETRAC" = true ]; then
         log_info "数据集作用域已启用（--dataset / --dairv2x / --uadetrac），可与 --rt-detr、--cas-main、--dqm_detr、--dqm_module_ablation、--dqm_degradation、--dqm_main 等任意顺序组合"
     fi
-    if [ "$has_n" = true ] || [ "$has_s" = true ] || [ "$has_m" = true ]; then
-        log_info "模型规模作用域已启用（--n / --s / --m）；推荐与 --yolo 或 --yolov5/--yolov8/--yolov12/--yolox 组合"
+    if [ "$has_s" = true ] || [ "$has_m" = true ]; then
+        log_info "模型规模作用域已启用（--s / --m）；推荐与 --yolo 或 --yolov5/--yolov8/--yolov12/--yolox 组合"
     fi
 
     # 如果设置了测试模式，显示提示
@@ -1257,7 +1235,6 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --yolox                         # 只运行 YOLOX"
         echo "  ./run_batch_experiments.sh --yolo                          # 一键 YOLOv5+v8+v12+YOLOX"
         echo "  ./run_batch_experiments.sh --yolo --s                      # 仅 s 规模（两数据集）"
-        echo "  ./run_batch_experiments.sh --yolo --n --dairv2x            # 仅 DAIR 的 n 规模"
         echo "  ./run_batch_experiments.sh --fasterrcnn                    # 只运行 torchvision Faster R-CNN"
         echo "  ./run_batch_experiments.sh --deim                           # 只运行 DEIM-S（DAIR + UA-DETRAC）"
         echo "  ./run_batch_experiments.sh --fair-baselines --dairv2x      # 公平基线：DEIM + RT-DETR + D-FINE，仅移除 decoder FFN 预训练参数"
@@ -1278,7 +1255,6 @@ parse_arguments() {
         echo "  ./run_batch_experiments.sh --test --rtdetrv2 --cas-main --dqm_detr      # 测试模式运行多个类型"
         echo "  ./run_batch_experiments.sh --dqm_module_ablation --dqm_degradation      # DQM 模块消融 + 退化消融"
         echo "  ./run_batch_experiments.sh --r18                           # 只运行R18"
-        echo "  ./run_batch_experiments.sh --n                             # 只运行所有 n 规模 YOLO（v5/v8/v12）"
         echo "  ./run_batch_experiments.sh --s                             # 只运行所有 s 规模 YOLO / YOLOX"
         echo "  ./run_batch_experiments.sh --m                             # 只运行所有 m 规模 YOLO / YOLOX"
         echo "  ./run_batch_experiments.sh --k0.5                          # 只跑路径名含 ratio0.5 的配置"
@@ -1312,6 +1288,18 @@ parse_arguments() {
 yolo_run_completed() {
     local run_dir="$1"
     [ -f "$run_dir/training.log" ] && grep -qE '训练完成！|训练完成!' "$run_dir/training.log"
+}
+
+# run 目录名统一规范（与 base_yolo_trainer.py / train_yolox.py 一致）：
+#   yolov5m -> yolo_v5m_*、yolov12m -> yolo_v12m_*、yoloxm -> yolo_yolox_m_*
+yolo_run_prefix() {
+    local model="$1"
+    case "$model" in
+        yolov*) model="v${model#yolov}" ;;
+        yolo1*|yolo2*) model="v${model#yolo}" ;;
+        yolox*) model="yolox_${model#yolox}" ;;
+    esac
+    echo "yolo_${model}_"
 }
 
 yolo_find_incomplete_checkpoint() {
@@ -1630,16 +1618,17 @@ run_single_experiment() {
     elif [ -n "$YOLO_VERSION" ] && [ "$TEST_MODE" = true ]; then
         local yolo_log_root="$SCRIPT_DIR/yolo/logs"
         local yolo_dataset_dir="$yolo_log_root/$experiment_protocol"
-        local yolo_prefix="yolo_${exp_name%%_*}_"
+        local yolo_model="${exp_name%%_*}"
         if [ "${SKIP_COMPLETED_YOLO_RUNS:-1}" = "1" ]; then
             # Historical YOLO run directories use the model-only prefix
             # (e.g. yolo_yolov5m_<timestamp>), while queue keys include the
             # dataset suffix (yolov5m_dairv2x). Match the stable model name.
             local completed_run
-            completed_run=$(yolo_find_completed_run "$yolo_dataset_dir" "$yolo_prefix")
+            completed_run=$(yolo_find_completed_run "$yolo_dataset_dir" "$(yolo_run_prefix "$yolo_model")")
             if [ -n "$completed_run" ]; then
                 log_warning "跳过已完成的 YOLO 实验: $exp_display -> $completed_run"
                 SKIPPED_EXPERIMENTS=$((SKIPPED_EXPERIMENTS + 1))
+                cd "$original_dir"
                 return 0
             fi
         fi
@@ -1647,7 +1636,7 @@ run_single_experiment() {
         yolo_dataset_args=("--${experiment_protocol//_/-}")
         local yolo_resume_checkpoint=""
         if [ "${YOLO_RESUME:-1}" = "1" ]; then
-            yolo_resume_checkpoint=$(yolo_find_incomplete_checkpoint "$yolo_dataset_dir" "yolo_${exp_name%%_*}_")
+            yolo_resume_checkpoint=$(yolo_find_incomplete_checkpoint "$yolo_dataset_dir" "$(yolo_run_prefix "$yolo_model")")
         fi
         if [ -n "$yolo_resume_checkpoint" ]; then
             log_info "YOLO 续训: $exp_display <- $yolo_resume_checkpoint"
@@ -1658,13 +1647,14 @@ run_single_experiment() {
     elif [ -n "$YOLO_VERSION" ]; then
         local yolo_log_root="$SCRIPT_DIR/yolo/logs"
         local yolo_dataset_dir="$yolo_log_root/$experiment_protocol"
-        local yolo_prefix="yolo_${exp_name%%_*}_"
+        local yolo_model="${exp_name%%_*}"
         if [ "${SKIP_COMPLETED_YOLO_RUNS:-1}" = "1" ]; then
             local completed_run
-            completed_run=$(yolo_find_completed_run "$yolo_dataset_dir" "$yolo_prefix")
+            completed_run=$(yolo_find_completed_run "$yolo_dataset_dir" "$(yolo_run_prefix "$yolo_model")")
             if [ -n "$completed_run" ]; then
                 log_warning "跳过已完成的 YOLO 实验: $exp_display -> $completed_run"
                 SKIPPED_EXPERIMENTS=$((SKIPPED_EXPERIMENTS + 1))
+                cd "$original_dir"
                 return 0
             fi
         fi
@@ -1672,7 +1662,7 @@ run_single_experiment() {
         yolo_dataset_args=("--${experiment_protocol//_/-}")
         local yolo_resume_checkpoint=""
         if [ "${YOLO_RESUME:-1}" = "1" ]; then
-            yolo_resume_checkpoint=$(yolo_find_incomplete_checkpoint "$yolo_dataset_dir" "yolo_${exp_name%%_*}_")
+            yolo_resume_checkpoint=$(yolo_find_incomplete_checkpoint "$yolo_dataset_dir" "$(yolo_run_prefix "$yolo_model")")
         fi
         if [ -n "$yolo_resume_checkpoint" ]; then
             log_info "YOLO 续训: $exp_display <- $yolo_resume_checkpoint"

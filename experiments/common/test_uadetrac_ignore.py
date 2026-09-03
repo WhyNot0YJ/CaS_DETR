@@ -15,6 +15,7 @@ from uadetrac_ignore import (
     apply_query_keep_mask,
     canonical_ignore_boxes,
     filter_coco_predictions_by_ignore,
+    filter_gt_annotations_by_ignore,
     filter_tensor_predictions_by_ignore,
     ignore_regions_xyxy,
 )
@@ -176,6 +177,31 @@ class IgnoreEvaluationTest(unittest.TestCase):
             {"image_id": 1, "category_id": 1, "bbox": [60, 60, 20, 20], "score": 0.90},
         ]
         self.assertEqual(len(filter_coco_predictions_by_ignore(gt, predictions)), 1)
+        coco_eval = run_coco_bbox_eval(gt, predictions)
+        self.assertIsNotNone(coco_eval)
+        self.assertAlmostEqual(float(coco_eval.stats[1]), 1.0, places=6)
+
+    def test_gt_inside_ignore_region_is_not_counted_as_missed(self):
+        from common.det_eval_metrics import run_coco_bbox_eval
+
+        gt = {
+            "images": [{
+                "id": 1, "width": 100, "height": 100,
+                "ignore_regions": [{"bbox": [0, 0, 40, 40]}],
+            }],
+            "categories": [{"id": 1, "name": "car"}],
+            "annotations": [
+                {"id": 1, "image_id": 1, "category_id": 1,
+                 "bbox": [5, 5, 20, 20], "area": 400, "iscrowd": 0},
+                {"id": 2, "image_id": 1, "category_id": 1,
+                 "bbox": [60, 60, 20, 20], "area": 400, "iscrowd": 0},
+            ],
+        }
+        self.assertEqual([ann["id"] for ann in filter_gt_annotations_by_ignore(gt)], [2])
+        predictions = [
+            {"image_id": 1, "category_id": 1, "bbox": [5, 5, 20, 20], "score": 0.99},
+            {"image_id": 1, "category_id": 1, "bbox": [60, 60, 20, 20], "score": 0.90},
+        ]
         coco_eval = run_coco_bbox_eval(gt, predictions)
         self.assertIsNotNone(coco_eval)
         self.assertAlmostEqual(float(coco_eval.stats[1]), 1.0, places=6)

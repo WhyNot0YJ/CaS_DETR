@@ -10,6 +10,9 @@ from typing import Any
 import numpy as np
 import torch
 
+from ultralytics.utils.loss import v8DetectionLoss
+from ultralytics.utils.tal import make_anchors
+
 _experiments_root = Path(__file__).resolve().parent.parent
 if str(_experiments_root) not in sys.path:
     sys.path.insert(0, str(_experiments_root))
@@ -80,50 +83,63 @@ def _ignore_anchor_mask(pred_boxes: torch.Tensor, ignore_boxes: torch.Tensor) ->
     return mask
 
 
+class UADETRACDetectionLoss(v8DetectionLoss):
+    """必须定义在模块级：BaseModel.loss() 会把 criterion 挂到 model 上进 checkpoint，
+    函数内 local 类无法被 torch.save 序列化。"""
+
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]):
+        loss = torch.zeros(3, device=self.device)
+        feats = preds[1] if isinstance(preds, tuple) else preds
+        pred_distri, pred_scores = torch.cat(
+            [item.view(feats[0].shape[0], self.no, -1) for item in feats], 2
+        ).split((self.reg_max * 4, self.nc), 1)
+        pred_scores, pred_distri = pred_scores.permute(0, 2, 1).contiguous(), pred_distri.permute(0, 2, 1).contiguous()
+        dtype, batch_size = pred_scores.dtype, pred_scores.shape[0]
+        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
+        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+        targets, ignore_boxes = _split_targets(batch, batch_size, imgsz[[1, 0, 1, 0]], self.preprocess)
+        gt_labels, gt_bboxes = targets.split((1, 4), 2)
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)
+        _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
+            pred_scores.detach().sigmoid(), (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+            anchor_points * stride_tensor, gt_labels, gt_bboxes, mask_gt,
+        )
+        target_scores_sum = max(target_scores.sum(), 1)
+        cls_loss = self.bce(pred_scores, target_scores.to(dtype))
+        ignored = _ignore_anchor_mask(pred_bboxes.detach() * stride_tensor, ignore_boxes)
+        cls_loss[ignored & ~fg_mask] = 0
+        loss[1] = cls_loss.sum() / target_scores_sum
+        if fg_mask.sum():
+            target_bboxes /= stride_tensor
+            loss[0], loss[2] = self.bbox_loss(
+                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
+            )
+        loss[0] *= self.hyp.box
+        loss[1] *= self.hyp.cls
+        loss[2] *= self.hyp.dfl
+        return loss * batch_size, loss.detach()
+
+
+class _IgnoreCriterionFactory:
+    """torch.save 无法 pickle 函数内 lambda；用模块级可 pickle 工厂替代 init_criterion 赋值，
+    保证 checkpoint 序列化（save_model / EMA）不炸。"""
+
+    def __init__(self, model):
+        self.model = model
+
+    def __call__(self):
+        return UADETRACDetectionLoss(self.model)
+
+
 def build_ignore_detection_trainer():
     """Create version-pinned subclasses after importing the installed Ultralytics package."""
     from ultralytics.data.dataset import YOLODataset
     from ultralytics.models.yolo.detect.train import DetectionTrainer
     from ultralytics.models.yolo.detect.val import DetectionValidator
-    from ultralytics.utils.loss import v8DetectionLoss
-    from ultralytics.utils.tal import make_anchors
 
     class UADETRACYOLODataset(UADETRACYOLODatasetMixin, YOLODataset):
         pass
-
-    class UADETRACDetectionLoss(v8DetectionLoss):
-        def __call__(self, preds: Any, batch: dict[str, torch.Tensor]):
-            loss = torch.zeros(3, device=self.device)
-            feats = preds[1] if isinstance(preds, tuple) else preds
-            pred_distri, pred_scores = torch.cat(
-                [item.view(feats[0].shape[0], self.no, -1) for item in feats], 2
-            ).split((self.reg_max * 4, self.nc), 1)
-            pred_scores, pred_distri = pred_scores.permute(0, 2, 1).contiguous(), pred_distri.permute(0, 2, 1).contiguous()
-            dtype, batch_size = pred_scores.dtype, pred_scores.shape[0]
-            imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
-            anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
-            targets, ignore_boxes = _split_targets(batch, batch_size, imgsz[[1, 0, 1, 0]], self.preprocess)
-            gt_labels, gt_bboxes = targets.split((1, 4), 2)
-            mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
-            pred_bboxes = self.bbox_decode(anchor_points, pred_distri)
-            _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
-                pred_scores.detach().sigmoid(), (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
-                anchor_points * stride_tensor, gt_labels, gt_bboxes, mask_gt,
-            )
-            target_scores_sum = max(target_scores.sum(), 1)
-            cls_loss = self.bce(pred_scores, target_scores.to(dtype))
-            ignored = _ignore_anchor_mask(pred_bboxes.detach() * stride_tensor, ignore_boxes)
-            cls_loss[ignored & ~fg_mask] = 0
-            loss[1] = cls_loss.sum() / target_scores_sum
-            if fg_mask.sum():
-                target_bboxes /= stride_tensor
-                loss[0], loss[2] = self.bbox_loss(
-                    pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
-                )
-            loss[0] *= self.hyp.box
-            loss[1] *= self.hyp.cls
-            loss[2] *= self.hyp.dfl
-            return loss * batch_size, loss.detach()
 
     class UADETRACDetectionValidator(DetectionValidator):
         def build_dataset(self, img_path: str, mode: str = "val", batch: int | None = None):
@@ -142,6 +158,8 @@ def build_ignore_detection_trainer():
                 ignored_gt = pbatch["cls"] < 0
                 ignore_boxes = pbatch["bboxes"][ignored_gt]
                 pbatch["cls"], pbatch["bboxes"] = pbatch["cls"][~ignored_gt], pbatch["bboxes"][~ignored_gt]
+                keep_gt = ~ignored_prediction_mask(pbatch["bboxes"], ignore_boxes)
+                pbatch["cls"], pbatch["bboxes"] = pbatch["cls"][keep_gt], pbatch["bboxes"][keep_gt]
                 predn = self._prepare_pred(pred)
                 keep = ~ignored_prediction_mask(predn["bboxes"], ignore_boxes)
                 predn = {key: value[keep] if isinstance(value, torch.Tensor) and value.shape[0] == keep.shape[0] else value for key, value in predn.items()}
@@ -181,12 +199,28 @@ def build_ignore_detection_trainer():
 
         def get_model(self, cfg=None, weights=None, verbose=True):
             model = super().get_model(cfg, weights, verbose)
-            model.init_criterion = lambda: UADETRACDetectionLoss(model)
+            model.init_criterion = _IgnoreCriterionFactory(model)
             return model
 
         def setup_model(self):
             checkpoint = super().setup_model()
-            self.model.init_criterion = lambda: UADETRACDetectionLoss(self.model)
+            self.model.init_criterion = _IgnoreCriterionFactory(self.model)
             return checkpoint
+
+        def save_model(self):
+            # Checkpoint 是交付物：剥离引用本仓库模块的 criterion 对象，
+            # 保证任意进程（benchmark/eval/外部工具）torch.load 无需 import
+            # uadetrac_ultralytics。保存后恢复，训练不受影响。
+            restore = []
+            holders = [self.model] + ([self.ema.ema] if self.ema else [])
+            for holder in holders:
+                for attr in ("criterion", "init_criterion"):
+                    if attr in vars(holder):
+                        restore.append((holder, attr, vars(holder).pop(attr)))
+            try:
+                return super().save_model()
+            finally:
+                for holder, attr, value in restore:
+                    setattr(holder, attr, value)
 
     return UADETRACDetectionTrainer

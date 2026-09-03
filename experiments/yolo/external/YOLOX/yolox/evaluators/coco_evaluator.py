@@ -18,7 +18,7 @@ import numpy as np
 
 import torch
 
-from common.uadetrac_ignore import filter_coco_predictions_by_ignore
+from common.uadetrac_ignore import drop_ignored_gt_from_coco, filter_coco_predictions_by_ignore
 
 from yolox.data.datasets import COCO_CLASSES
 from yolox.utils import (
@@ -285,6 +285,7 @@ class COCOEvaluator:
         cocoGt = self.dataloader.dataset.coco
         if any(image.get("ignore_regions") for image in cocoGt.dataset.get("images", [])):
             data_dict = filter_coco_predictions_by_ignore(cocoGt.dataset, data_dict)
+            cocoGt = drop_ignored_gt_from_coco(cocoGt)
 
         # Evaluate the Dt (detection) json comparing with the ground truth
         if len(data_dict) > 0:

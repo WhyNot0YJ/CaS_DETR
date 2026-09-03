@@ -6,7 +6,7 @@ import copy
 from typing import Any, Dict, List, Optional
 
 import torch
-from common.uadetrac_ignore import filter_tensor_predictions_by_ignore
+from common.uadetrac_ignore import drop_ignored_gt_from_coco, filter_tensor_predictions_by_ignore
 
 from ...core import register
 from .coco_eval import CocoEvaluator
@@ -89,6 +89,7 @@ class CocoEvaluatorTrainLabelMapping:
         drop_unmapped_gt: bool = False,
         override_categories: Optional[List[Dict[str, Any]]] = None,
     ):
+        coco_gt = drop_ignored_gt_from_coco(coco_gt)
         if cross_domain_label_map is not None:
             if override_categories is None:
                 raise ValueError(

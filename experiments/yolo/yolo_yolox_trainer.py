@@ -203,7 +203,8 @@ class YOLOXTrainer(BaseYOLOTrainer):
         return self._resolve_yolox_eval_ckpt()
 
     def _tensorrt_extra_args(self) -> List[str]:
-        return ["--yolox-exp", str(self._resolve_yolox_exp_file())]
+        # YOLOX 导出必须显式给类别数（exp 文件里是 COCO 的 80 类默认值）
+        return ["--yolox-exp", str(self._resolve_yolox_exp_file()), "--num-classes", str(self.num_classes)]
 
     def _optional_post_train_benchmark(self, model) -> Optional[dict]:
         """

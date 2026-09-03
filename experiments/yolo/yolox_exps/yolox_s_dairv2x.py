@@ -9,7 +9,6 @@ from cas_yolox_exp import CasYoloxExp
 class Exp(CasYoloxExp):
     def __init__(self):
         super().__init__()
-        self.num_classes = 5
         self.image_layout = "flat_image_dir"
         self.val_ann = "instances_eval.json"
         self.test_ann = "instances_eval.json"

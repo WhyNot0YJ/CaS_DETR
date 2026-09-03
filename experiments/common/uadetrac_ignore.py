@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 
@@ -74,36 +75,75 @@ def filter_tensor_predictions_by_ignore(
     return output
 
 
+def _ignores_by_image(coco_dataset: Mapping[str, Any]) -> Dict[int, List[List[float]]]:
+    """Map image id -> clipped ignore rectangles, skipping images without any."""
+    return {
+        int(image["id"]): ignore_regions_xyxy(image)
+        for image in coco_dataset.get("images", []) or []
+        if image.get("ignore_regions")
+    }
+
+
+def _is_ignored_xywh(bbox: Any, ignores: Sequence[Sequence[float]], threshold: float) -> bool:
+    """Apply the official fixed-IoA rule to a single COCO xywh box."""
+    x, y, width, height = (float(value) for value in bbox)
+    area = max(0.0, width) * max(0.0, height)
+    if area <= 0 or not ignores:
+        return False
+    x2, y2 = x + max(0.0, width), y + max(0.0, height)
+    return any(
+        max(0.0, min(x2, ix2) - max(x, ix1)) * max(0.0, min(y2, iy2) - max(y, iy1)) / area >= threshold
+        for ix1, iy1, ix2, iy2 in ignores
+    )
+
+
 def filter_coco_predictions_by_ignore(
     coco_dataset: Mapping[str, Any],
     predictions: Iterable[Mapping[str, Any]],
     threshold: float = IGNORE_IOA_THRESHOLD,
 ) -> List[Dict[str, Any]]:
     """Filter COCO xywh predictions with the same fixed IoA rule as training."""
-    images = {int(image["id"]): image for image in coco_dataset.get("images", []) or []}
-    ignores_by_image = {
-        image_id: ignore_regions_xyxy(image)
-        for image_id, image in images.items()
-        if image.get("ignore_regions")
-    }
-    output: List[Dict[str, Any]] = []
-    for prediction in predictions:
-        ignores = ignores_by_image.get(int(prediction["image_id"]), ())
-        x, y, width, height = (float(value) for value in prediction["bbox"])
-        area = max(0.0, width) * max(0.0, height)
-        ignored = False
-        if area > 0:
-            x2, y2 = x + max(0.0, width), y + max(0.0, height)
-            for ix1, iy1, ix2, iy2 in ignores:
-                intersection = max(0.0, min(x2, ix2) - max(x, ix1)) * max(
-                    0.0, min(y2, iy2) - max(y, iy1)
-                )
-                if intersection / area >= threshold:
-                    ignored = True
-                    break
-        if not ignored:
-            output.append(dict(prediction))
-    return output
+    ignores_by_image = _ignores_by_image(coco_dataset)
+    return [
+        dict(prediction)
+        for prediction in predictions
+        if not _is_ignored_xywh(
+            prediction["bbox"], ignores_by_image.get(int(prediction["image_id"]), ()), threshold
+        )
+    ]
+
+
+def filter_gt_annotations_by_ignore(
+    coco_dataset: Mapping[str, Any],
+    threshold: float = IGNORE_IOA_THRESHOLD,
+) -> List[Dict[str, Any]]:
+    """Drop non-crowd GT annotations whose IoA with an ignore region reaches the threshold.
+
+    Keeps the recall denominator symmetric with prediction filtering: a GT inside an
+    ignore region can never be matched because its prediction would have been dropped.
+    """
+    ignores_by_image = _ignores_by_image(coco_dataset)
+    return [
+        dict(ann)
+        for ann in coco_dataset.get("annotations", []) or []
+        if ann.get("iscrowd")
+        or not _is_ignored_xywh(
+            ann.get("bbox", (0, 0, 0, 0)),
+            ignores_by_image.get(int(ann.get("image_id", -1)), ()),
+            threshold,
+        )
+    ]
+
+
+def drop_ignored_gt_from_coco(coco_gt, threshold: float = IGNORE_IOA_THRESHOLD):
+    """Return a COCO gt object without ignore-region GTs; copies only when needed."""
+    anns = filter_gt_annotations_by_ignore(coco_gt.dataset, threshold)
+    if len(anns) == len(coco_gt.dataset.get("annotations", []) or []):
+        return coco_gt
+    coco_gt = copy.deepcopy(coco_gt)
+    coco_gt.dataset["annotations"] = anns
+    coco_gt.createIndex()
+    return coco_gt
 
 
 def unmatched_query_keep_mask(

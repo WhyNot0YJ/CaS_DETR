@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import torch
-from common.uadetrac_ignore import filter_tensor_predictions_by_ignore
+from common.uadetrac_ignore import drop_ignored_gt_from_coco, filter_tensor_predictions_by_ignore
 
 from ...core import register
 from .coco_eval import CocoEvaluator
@@ -74,7 +74,9 @@ class CocoEvaluatorTrainLabelMapping:
     """Like CocoEvaluator, but maps prediction label indices to category ids in update."""
 
     def __init__(self, coco_gt, iou_types):
-        self._impl = CocoEvaluatorTrainLabelAdapter(CocoEvaluator(coco_gt, iou_types))
+        self._impl = CocoEvaluatorTrainLabelAdapter(
+            CocoEvaluator(drop_ignored_gt_from_coco(coco_gt), iou_types)
+        )
 
     def __getattr__(self, name):
         return getattr(self._impl, name)

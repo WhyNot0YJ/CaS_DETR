@@ -4,7 +4,6 @@ model:
 
 training:
   epochs: 132
-  close_mosaic: 32
 
 data:
   data_yaml: "/root/autodl-fs/datasets/UA-DETRAC_YOLO/data.yaml"

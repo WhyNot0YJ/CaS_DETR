@@ -4,10 +4,6 @@ model:
 training:
   epochs: 132
   imgsz: 640
-  batch_size: 8
-  # best.pt 按 val mAP@0.5:0.95 选择（每轮全量评估）
-  val_map_freq: 1
-  val_map_max_images: 0
 
 data:
   data_yaml: "/root/autodl-fs/datasets/DAIR-V2X_YOLO/dairv2x.yaml"

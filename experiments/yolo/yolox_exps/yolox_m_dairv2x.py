@@ -11,7 +11,6 @@ class Exp(CasYoloxExp):
         super().__init__()
         self.depth = 0.67
         self.width = 0.75
-        self.num_classes = 5
         self.image_layout = "flat_image_dir"
         self.val_ann = "instances_eval.json"
         self.test_ann = "instances_eval.json"

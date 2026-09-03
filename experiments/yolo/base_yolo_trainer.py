@@ -136,7 +136,12 @@ class BaseYOLOTrainer(ABC):
             if model_name.endswith('.pt'):
                 model_name = model_name[:-3]
             
-            self.experiment_name = f"yolo_{model_name.replace(f'yolo{self.VERSION}', f'v{self.VERSION}')}"
+            # 目录名统一规范：yolo_v5m_* / yolo_v8s_* / yolo_v12m_*
+            # （先匹配 yolov5m 再匹配 yolo12m 两种官方命名风格）
+            short_name = (model_name
+                          .replace(f'yolov{self.VERSION}', f'v{self.VERSION}')
+                          .replace(f'yolo{self.VERSION}', f'v{self.VERSION}'))
+            self.experiment_name = f"yolo_{short_name}"
             log_base = self.checkpoint_config.get('log_dir', 'logs')
             data_yaml = self.data_config.get('data_yaml', '')
             ds_stem = Path(data_yaml).stem if data_yaml else 'unknown'
@@ -354,6 +359,7 @@ class BaseYOLOTrainer(ABC):
                 "UA-DETRAC YOLO 训练需要 data.coco_data_root/annotations/instances_{train,val,test}.json 的 ignore_regions"
             )
         data = yaml.safe_load(Path(self._resolve_data_yaml()).read_text(encoding="utf-8")) or {}
+        data["path"] = str(Path(self._resolve_data_yaml()).resolve().parent)
         data["ignore_coco_anns"] = [str(path) for path in annotations]
         path = self.log_dir / "uadetrac_ignore_data.yaml"
         path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
