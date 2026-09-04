@@ -159,7 +159,11 @@ def main():
         resume_checkpoint=args.resume_from_checkpoint,
         epochs_override=args.epochs,
     )
-    trainer.run_tensorrt_benchmark()
+    # TensorRT benchmark 仅用于测速；失败不应让整个实验失败（训练+评测已成功）。
+    try:
+        trainer.run_tensorrt_benchmark()
+    except Exception as exc:
+        print(f"[train-notify] TensorRT benchmark 失败: {exc}")
     return {"output_dir": str(trainer.log_dir)}
 
 
